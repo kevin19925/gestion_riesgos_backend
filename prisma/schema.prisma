@@ -39,6 +39,15 @@ model Cargo {
   usuarios  Usuario[]
 }
 
+model Gerencia {
+  id          String   @id @default(uuid())
+  nombre      String   @unique
+  sigla       String?
+  subdivision String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
 model Area {
   id          String   @id @default(uuid())
   nombre      String   @unique

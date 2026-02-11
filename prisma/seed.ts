@@ -42,6 +42,7 @@ async function main() {
         await prisma.area.deleteMany({});
         await prisma.usuario.deleteMany({});
         await prisma.cargo.deleteMany({});
+        await prisma.gerencia.deleteMany({});
         console.log('✅ Limpieza completada\n')
     } catch (e) {
         console.warn('⚠️  Advertencia en limpieza:', e)
@@ -85,6 +86,22 @@ async function main() {
         });
     }
     console.log('✅ 4 usuarios creados\n')
+
+    // ==========================================
+    // 2.1 CREAR GERENCIAS
+    // ==========================================
+    console.log('🏢 Creando gerencias...')
+    const gerencias = [
+        { nombre: 'Gerencia General', sigla: 'GG', subdivision: 'Directiva' },
+        { nombre: 'Gerencia Financiera', sigla: 'GF', subdivision: 'Administrativa' },
+        { nombre: 'Gerencia de Talento Humano', sigla: 'GTH', subdivision: 'Apoyo' },
+        { nombre: 'Gerencia de Operaciones', sigla: 'GO', subdivision: 'Operativa' }
+    ];
+
+    for (const g of gerencias) {
+        await prisma.gerencia.create({ data: g });
+    }
+    console.log('✅ 4 gerencias creadas\n')
 
     // ==========================================
     // 3. CREAR ÁREAS
