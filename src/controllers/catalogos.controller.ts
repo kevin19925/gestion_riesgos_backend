@@ -32,11 +32,11 @@ export const getTipologias = async (req: Request, res: Response) => {
                 id: '1',
                 nombre: 'Tipologías Nivel I',
                 nivel: 'I',
-                categorias: tipologias.map(t => ({
+                categorias: tipologias.map((t: any) => ({
                     id: t.id,
                     codigo: t.codigo,
                     descripcion: t.nombre,
-                    subtipos: t.subtipos.map(s => ({
+                    subtipos: t.subtipos.map((s: any) => ({
                         id: s.id,
                         codigo: s.codigo,
                         nombre: s.nombre,
@@ -93,7 +93,7 @@ export const getMapaConfig = async (req: Request, res: Response) => {
 export const getObjetivos = async (req: Request, res: Response) => {
     try {
         const objetivos = await prisma.objetivo.findMany();
-        res.json(objetivos.map(o => ({
+        res.json(objetivos.map((o: any) => ({
             id: o.id,
             codigo: o.codigo,
             descripcion: o.descripcion

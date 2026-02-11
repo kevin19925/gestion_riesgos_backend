@@ -7,7 +7,7 @@ export const getAreas = async (req: Request, res: Response) => {
             include: { director: true }
         });
         // Transform to return directorNombre
-        const transformed = areas.map(a => ({
+        const transformed = areas.map((a: any) => ({
             ...a,
             directorNombre: a.director?.nombre
         }));
