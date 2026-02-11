@@ -64,10 +64,10 @@ async function main() {
     }
 
     const usuarios = [
-        { id: 'user-admin', nombre: 'Andrés Martínez', email: 'admin@comware.com.co', role: 'admin', cargo: 'Administrador' },
-        { id: 'user-gerente', nombre: 'Carlos Ayala', email: 'gerente@comware.com.co', role: 'gerente_general', cargo: 'Gerente General' },
-        { id: 'user-marco', nombre: 'Marco Alvarado', email: 'marco@comware.com.co', role: 'dueño_procesos', cargo: 'Director Financiero' },
-        { id: 'user-katherine', nombre: 'Katherine Chavez', email: 'katherine@comware.com.co', role: 'dueño_procesos', cargo: 'Analista TH' }
+        { id: 'user-admin', nombre: 'Andrés Martínez', email: 'admin@comware.com.ec', role: 'admin', cargo: 'Administrador' },
+        { id: 'user-gerente', nombre: 'Carlos Ayala', email: 'gerente@comware.com.ec', role: 'gerente_general', cargo: 'Gerente General' },
+        { id: 'user-marco', nombre: 'Marco Alvarado', email: 'marco@comware.com.ec', role: 'dueño_procesos', cargo: 'Director Financiero' },
+        { id: 'user-katherine', nombre: 'Katherine Chavez', email: 'katherine@comware.com.ec', role: 'dueño_procesos', cargo: 'Analista TH' }
     ];
 
     for (const u of usuarios) {
