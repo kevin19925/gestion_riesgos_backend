@@ -182,14 +182,14 @@ export const getEstadisticas = async (req: Request, res: Response) => {
 
         const stats = {
             totalRiesgos,
-            criticos: riesgos.filter(r => r.evaluacion?.nivelRiesgo === 'Crítico').length,
-            altos: riesgos.filter(r => r.evaluacion?.nivelRiesgo === 'Alto').length,
-            medios: riesgos.filter(r => r.evaluacion?.nivelRiesgo === 'Medio').length,
-            bajos: riesgos.filter(r => r.evaluacion?.nivelRiesgo === 'Bajo').length,
-            positivos: riesgos.filter(r => r.clasificacion === 'Positiva').length,
-            negativos: riesgos.filter(r => r.clasificacion === 'Negativa').length,
-            evaluados: riesgos.filter(r => r.evaluacion).length,
-            sinEvaluar: riesgos.filter(r => !r.evaluacion).length,
+            criticos: riesgos.filter((r: any) => r.evaluacion?.nivelRiesgo === 'Crítico').length,
+            altos: riesgos.filter((r: any) => r.evaluacion?.nivelRiesgo === 'Alto').length,
+            medios: riesgos.filter((r: any) => r.evaluacion?.nivelRiesgo === 'Medio').length,
+            bajos: riesgos.filter((r: any) => r.evaluacion?.nivelRiesgo === 'Bajo').length,
+            positivos: riesgos.filter((r: any) => r.clasificacion === 'Positiva').length,
+            negativos: riesgos.filter((r: any) => r.clasificacion === 'Negativa').length,
+            evaluados: riesgos.filter((r: any) => r.evaluacion).length,
+            sinEvaluar: riesgos.filter((r: any) => !r.evaluacion).length,
         };
 
         res.json(stats);

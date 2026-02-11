@@ -824,10 +824,10 @@ async function main() {
     console.log('  📝 Planes de Acción: 2')
     console.log('  💥 Eventos Materializados: 2')
     console.log('\n🔐 Credenciales:')
-    console.log('  Email: admin@comware.com.co | Password: comware123')
-    console.log('  Email: gerente@comware.com.co | Password: comware123')
-    console.log('  Email: marco@comware.com.co | Password: comware123')
-    console.log('  Email: katherine@comware.com.co | Password: comware123')
+    console.log('  Email: admin@comware.com.ec | Password: comware123')
+    console.log('  Email: gerente@comware.com.ec | Password: comware123')
+    console.log('  Email: marco@comware.com.ec | Password: comware123')
+    console.log('  Email: katherine@comware.com.ec | Password: comware123')
     console.log('\n' + '='.repeat(50) + '\n')
 }
 
