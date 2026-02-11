@@ -37,6 +37,15 @@ app.use(cors({
 app.use(helmet());
 app.use(morgan('dev'));
 
+// Logger Middleware
+app.use((req, res, next) => {
+    console.log(`[BACKEND] ${new Date().toISOString()} - ${req.method} ${req.url}`);
+    if (req.body && Object.keys(req.body).length > 0) {
+        console.log('[BACKEND] Body:', JSON.stringify(req.body, null, 2));
+    }
+    next();
+});
+
 // Main Router
 app.use('/api', routes);
 

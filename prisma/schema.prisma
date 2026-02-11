@@ -1,5 +1,6 @@
 generator client {
   provider = "prisma-client-js"
+  output   = "../node_modules/.prisma/client"
 }
 
 datasource db {
@@ -34,9 +35,10 @@ model Usuario {
 }
 
 model Cargo {
-  id        Int       @id @default(autoincrement())
-  nombre    String    @unique
-  usuarios  Usuario[]
+  id          Int       @id @default(autoincrement())
+  nombre      String    @unique
+  descripcion String?
+  usuarios    Usuario[]
 }
 
 model Gerencia {
