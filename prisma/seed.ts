@@ -43,10 +43,10 @@ async function main() {
 
     // 2. CREAR CARGOS
     console.log('👥 Creando cargos...')
-    const cargoAdmin = await prisma.cargo.create({ data: { nombre: 'Administrador' } });
-    const cargoGerente = await prisma.cargo.create({ data: { nombre: 'Gerente General' } });
-    const cargoDirector = await prisma.cargo.create({ data: { nombre: 'Director Financiero' } });
-    const cargoAnalista = await prisma.cargo.create({ data: { nombre: 'Analista TH' } });
+    const cargoAdmin = await prisma.cargo.create({ data: { nombre: 'Administrador', descripcion: 'Administrador total del sistema' } });
+    const cargoGerente = await prisma.cargo.create({ data: { nombre: 'Gerente General', descripcion: 'Máxima autoridad de la empresa' } });
+    const cargoDirector = await prisma.cargo.create({ data: { nombre: 'Director Financiero', descripcion: 'Responsable de las finanzas corporativas' } });
+    const cargoAnalista = await prisma.cargo.create({ data: { nombre: 'Analista TH', descripcion: 'Analista de Talento Humano' } });
 
     // 3. CREAR USUARIOS
     console.log('👤 Creando usuarios...')

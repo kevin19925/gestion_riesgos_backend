@@ -3,11 +3,9 @@ import prisma from '../prisma';
 
 export const login = async (req: Request, res: Response) => {
     const { username, password } = req.body;
+    console.log(`[BACKEND] login request - username: ${username}`);
 
     try {
-        // En un entorno real, buscaríamos por username/email y verificaríamos password encriptado.
-        // Por ahora, como el usuario pidió 'comware123', buscamos por email y comparamos password directo.
-
         const user = await prisma.usuario.findFirst({
             where: {
                 OR: [
@@ -20,14 +18,16 @@ export const login = async (req: Request, res: Response) => {
         });
 
         if (!user) {
+            console.warn(`[BACKEND] Login failed for: ${username}`);
             return res.status(401).json({ success: false, error: 'Usuario o contraseña incorrectos' });
         }
 
         if (!user.activo) {
+            console.warn(`[BACKEND] Inactive user login attempt: ${username}`);
             return res.status(401).json({ success: false, error: 'Usuario inactivo' });
         }
 
-        // Devolvemos el usuario en el formato que espera el frontend
+        console.log(`[BACKEND] Login successful: ${user.email}`);
         res.json({
             success: true,
             user: {
@@ -42,18 +42,19 @@ export const login = async (req: Request, res: Response) => {
             }
         });
     } catch (error) {
-        console.error('Login error:', error);
+        console.error('[BACKEND] Login system error:', error);
         res.status(500).json({ success: false, error: 'Error en el servidor' });
     }
 };
 
 export const getMe = async (req: Request, res: Response) => {
-    const { id } = req.query; // For simple demo/testing if no JWT
+    const { id } = req.query;
+    console.log(`[BACKEND] getMe - id: ${id}`);
     if (!id) return res.status(400).json({ error: 'User ID required' });
 
     try {
         const user = await prisma.usuario.findUnique({
-            where: { id: String(id) },
+            where: { id: Number(id) },
             include: { cargo: true }
         });
         if (!user) return res.status(404).json({ error: 'User not found' });
@@ -69,6 +70,7 @@ export const getMe = async (req: Request, res: Response) => {
             esDuenoProcesos: user.role === 'dueño_procesos'
         });
     } catch (error) {
+        console.error('[BACKEND] getMe error:', error);
         res.status(500).json({ error: 'Server error' });
     }
 };
