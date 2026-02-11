@@ -19,7 +19,7 @@ export const getProcesos = async (req: Request, res: Response) => {
 };
 
 export const getProcesoById = async (req: Request, res: Response) => {
-    const { id } = req.params;
+    const id = Number(req.params.id);
     try {
         const proceso = await prisma.proceso.findUnique({
             where: { id },
@@ -63,7 +63,7 @@ export const createProceso = async (req: Request, res: Response) => {
 };
 
 export const updateProceso = async (req: Request, res: Response) => {
-    const { id } = req.params;
+    const id = Number(req.params.id);
     const { dofaItems, normatividades, contextos, id: bodyId, ...rest } = req.body;
     try {
         const updateData: any = { ...rest };
@@ -124,7 +124,7 @@ export const updateProceso = async (req: Request, res: Response) => {
 };
 
 export const deleteProceso = async (req: Request, res: Response) => {
-    const { id } = req.params;
+    const id = Number(req.params.id);
     try {
         await prisma.proceso.delete({ where: { id } });
         res.json({ message: 'Proceso deleted' });
@@ -133,7 +133,7 @@ export const deleteProceso = async (req: Request, res: Response) => {
     }
 };
 export const duplicateProceso = async (req: Request, res: Response) => {
-    const { id } = req.params;
+    const id = Number(req.params.id);
     const { overrides } = req.body;
     try {
         const original = await prisma.proceso.findUnique({

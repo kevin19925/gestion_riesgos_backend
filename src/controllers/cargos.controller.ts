@@ -11,7 +11,7 @@ export const getCargos = async (req: Request, res: Response) => {
 };
 
 export const getCargoById = async (req: Request, res: Response) => {
-    const { id } = req.params;
+    const id = Number(req.params.id);
     try {
         const cargo = await prisma.cargo.findUnique({
             where: { id }
@@ -36,7 +36,7 @@ export const createCargo = async (req: Request, res: Response) => {
 };
 
 export const updateCargo = async (req: Request, res: Response) => {
-    const { id } = req.params;
+    const id = Number(req.params.id);
     try {
         const cargo = await prisma.cargo.update({
             where: { id },
@@ -49,7 +49,7 @@ export const updateCargo = async (req: Request, res: Response) => {
 };
 
 export const deleteCargo = async (req: Request, res: Response) => {
-    const { id } = req.params;
+    const id = Number(req.params.id);
     try {
         await prisma.cargo.delete({
             where: { id }

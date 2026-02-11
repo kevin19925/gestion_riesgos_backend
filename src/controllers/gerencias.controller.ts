@@ -11,7 +11,7 @@ export const getGerencias = async (req: Request, res: Response) => {
 };
 
 export const getGerenciaById = async (req: Request, res: Response) => {
-    const { id } = req.params;
+    const id = Number(req.params.id);
     try {
         const gerencia = await prisma.gerencia.findUnique({
             where: { id }
@@ -36,7 +36,7 @@ export const createGerencia = async (req: Request, res: Response) => {
 };
 
 export const updateGerencia = async (req: Request, res: Response) => {
-    const { id } = req.params;
+    const id = Number(req.params.id);
     try {
         const gerencia = await prisma.gerencia.update({
             where: { id },
@@ -49,7 +49,7 @@ export const updateGerencia = async (req: Request, res: Response) => {
 };
 
 export const deleteGerencia = async (req: Request, res: Response) => {
-    const { id } = req.params;
+    const id = Number(req.params.id);
     try {
         await prisma.gerencia.delete({
             where: { id }

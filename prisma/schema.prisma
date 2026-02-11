@@ -11,12 +11,12 @@ datasource db {
 // ============================================
 
 model Usuario {
-  id        String   @id @default(uuid())
+  id        Int      @id @default(autoincrement())
   nombre    String
   email     String   @unique
   password  String   // Encriptada
   role      String   // 'admin', 'dueño_procesos', 'supervisor', 'gerente_general'
-  cargoId   String?
+  cargoId   Int?
   cargo     Cargo?   @relation(fields: [cargoId], references: [id])
   activo    Boolean  @default(true)
   createdAt DateTime @default(now())
@@ -34,13 +34,13 @@ model Usuario {
 }
 
 model Cargo {
-  id        String    @id @default(uuid())
+  id        Int       @id @default(autoincrement())
   nombre    String    @unique
   usuarios  Usuario[]
 }
 
 model Gerencia {
-  id          String   @id @default(uuid())
+  id          Int      @id @default(autoincrement())
   nombre      String   @unique
   sigla       String?
   subdivision String?
@@ -49,10 +49,10 @@ model Gerencia {
 }
 
 model Area {
-  id          String   @id @default(uuid())
+  id          Int      @id @default(autoincrement())
   nombre      String   @unique
   descripcion String?
-  directorId  String?
+  directorId  Int?
   director    Usuario? @relation("DirectorArea", fields: [directorId], references: [id])
   activo      Boolean  @default(true)
   createdAt   DateTime @default(now())
@@ -66,16 +66,16 @@ model Area {
 // ============================================
 
 model Proceso {
-  id              String   @id @default(uuid())
+  id              Int      @id @default(autoincrement())
   nombre          String   @unique
   descripcion     String?
   objetivo        String?
   tipo            String?  // Estratégico, Operacional, etc.
   
-  responsableId   String
+  responsableId   Int
   responsable     Usuario  @relation("ResponsableProceso", fields: [responsableId], references: [id])
   
-  areaId          String
+  areaId          Int
   area            Area     @relation(fields: [areaId], references: [id])
   
   // Campos adicionales para reportes
@@ -107,8 +107,8 @@ model Proceso {
 }
 
 model DofaItem {
-  id          String   @id @default(uuid())
-  procesoId   String
+  id          Int      @id @default(autoincrement())
+  procesoId   Int
   proceso     Proceso  @relation(fields: [procesoId], references: [id], onDelete: Cascade)
   tipo        String   // FORTALEZA, OPORTUNIDAD, DEBILIDAD, AMENAZA, FO, FA, DO, DA
   descripcion String
@@ -117,8 +117,8 @@ model DofaItem {
 }
 
 model Normatividad {
-  id                    String   @id @default(uuid())
-  procesoId             String
+  id                    Int      @id @default(autoincrement())
+  procesoId             Int
   proceso               Proceso  @relation(fields: [procesoId], references: [id], onDelete: Cascade)
   numero                Int
   nombre                String
@@ -136,8 +136,8 @@ model Normatividad {
 }
 
 model Contexto {
-  id          String   @id @default(uuid())
-  procesoId   String
+  id          Int      @id @default(autoincrement())
+  procesoId   Int
   proceso     Proceso  @relation(fields: [procesoId], references: [id], onDelete: Cascade)
   tipo        String   // INTERNO, EXTERNO
   descripcion String
@@ -146,8 +146,8 @@ model Contexto {
 }
 
 model Riesgo {
-  id              String   @id @default(uuid())
-  procesoId       String
+  id              Int      @id @default(autoincrement())
+  procesoId       Int
   proceso         Proceso  @relation(fields: [procesoId], references: [id])
   numero          Int
   descripcion     String
@@ -160,13 +160,13 @@ model Riesgo {
   tipologiaNivelII String?
   
   // Relaciones con catálogos (opcionalmente normalizado)
-  tipoRiesgoId    String?
+  tipoRiesgoId    Int?
   tipoRiesgo      TipoRiesgo? @relation(fields: [tipoRiesgoId], references: [id])
   
-  subtipoRiesgoId String?
+  subtipoRiesgoId Int?
   subtipoRiesgo   SubtipoRiesgo? @relation(fields: [subtipoRiesgoId], references: [id])
   
-  objetivoId      String?
+  objetivoId      Int?
   objetivo        Objetivo? @relation(fields: [objetivoId], references: [id])
   
   // Campos de Texto para compatibilidad o flexibilidad
@@ -187,14 +187,13 @@ model Riesgo {
   causas          CausaRiesgo[]
   priorizacion    PriorizacionRiesgo?
   eventosMaterializados EventoMaterializado[]
-  // mapaPunto       PuntoMapa? // Se puede derivar de Evaluación
 
   @@unique([procesoId, numero])
 }
 
 model CausaRiesgo {
-  id              String   @id @default(uuid())
-  riesgoId        String
+  id              Int      @id @default(autoincrement())
+  riesgoId        Int
   riesgo          Riesgo   @relation(fields: [riesgoId], references: [id], onDelete: Cascade)
   descripcion     String
   fuenteCausa     String? // 'Personas', 'Procesos', 'Externos'...
@@ -209,8 +208,8 @@ model CausaRiesgo {
 }
 
 model ControlRiesgo {
-  id              String      @id @default(uuid())
-  causaRiesgoId   String
+  id              Int         @id @default(autoincrement())
+  causaRiesgoId   Int
   causaRiesgo     CausaRiesgo @relation(fields: [causaRiesgoId], references: [id], onDelete: Cascade)
   descripcion     String
   tipoControl     String?     // AUTOMATICO, MANUAL...
@@ -235,8 +234,8 @@ model ControlRiesgo {
 }
 
 model EvaluacionRiesgo {
-  id                  String   @id @default(uuid())
-  riesgoId            String   @unique
+  id                  Int      @id @default(autoincrement())
+  riesgoId            Int      @unique
   riesgo              Riesgo   @relation(fields: [riesgoId], references: [id], onDelete: Cascade)
   
   impactoPersonas     Int
@@ -264,8 +263,8 @@ model EvaluacionRiesgo {
 }
 
 model PriorizacionRiesgo {
-  id                  String   @id @default(uuid())
-  riesgoId            String   @unique
+  id                  Int      @id @default(autoincrement())
+  riesgoId            Int      @unique
   riesgo              Riesgo   @relation(fields: [riesgoId], references: [id], onDelete: Cascade)
   
   calificacionFinal   Int?
@@ -278,8 +277,8 @@ model PriorizacionRiesgo {
 }
 
 model PlanAccion {
-  id                  String   @id @default(uuid())
-  priorizacionId      String
+  id                  Int      @id @default(autoincrement())
+  priorizacionId      Int
   priorizacion        PriorizacionRiesgo @relation(fields: [priorizacionId], references: [id], onDelete: Cascade)
   descripcion         String
   responsable         String?
@@ -293,7 +292,7 @@ model PlanAccion {
 // ============================================
 
 model TipoRiesgo {
-  id          String   @id @default(uuid())
+  id          Int      @id @default(autoincrement())
   codigo      String   @unique
   nombre      String   @unique
   descripcion String?
@@ -302,11 +301,11 @@ model TipoRiesgo {
 }
 
 model SubtipoRiesgo {
-  id           String     @id @default(uuid())
+  id           Int        @id @default(autoincrement())
   codigo       String?
   nombre       String
   descripcion  String?
-  tipoRiesgoId String
+  tipoRiesgoId Int
   tipoRiesgo   TipoRiesgo @relation(fields: [tipoRiesgoId], references: [id], onDelete: Cascade)
   riesgos      Riesgo[]
 
@@ -314,14 +313,14 @@ model SubtipoRiesgo {
 }
 
 model Objetivo {
-  id          String   @id @default(uuid())
+  id          Int      @id @default(autoincrement())
   codigo      String   @unique
   descripcion String   @unique
   riesgos     Riesgo[]
 }
 
 model Formula {
-  id          String   @id @default(uuid())
+  id          Int      @id @default(autoincrement())
   nombre      String   @unique
   descripcion String?
   formula     String
@@ -333,7 +332,7 @@ model Formula {
 }
 
 model MapaConfig {
-  id          String   @id @default(uuid())
+  id          Int      @id @default(autoincrement())
   nombre      String
   ejes        String? // JSON storing X and Y definitions
   createdAt   DateTime @default(now())
@@ -341,7 +340,7 @@ model MapaConfig {
 }
 
 model Configuracion {
-  id          String   @id @default(uuid())
+  id          Int      @id @default(autoincrement())
   clave       String   @unique
   valor       String
   tipo        String
@@ -353,8 +352,8 @@ model Configuracion {
 // ============================================
 
 model Notificacion {
-  id        String   @id @default(uuid())
-  usuarioId String
+  id        Int      @id @default(autoincrement())
+  usuarioId Int
   usuario   Usuario  @relation(fields: [usuarioId], references: [id])
   titulo    String
   mensaje   String
@@ -364,8 +363,8 @@ model Notificacion {
 }
 
 model Tarea {
-  id          String   @id @default(uuid())
-  usuarioId   String
+  id          Int      @id @default(autoincrement())
+  usuarioId   Int
   usuario     Usuario  @relation(fields: [usuarioId], references: [id])
   titulo      String
   descripcion String
@@ -376,10 +375,10 @@ model Tarea {
 }
 
 model Observacion {
-  id        String   @id @default(uuid())
-  procesoId String
+  id        Int      @id @default(autoincrement())
+  procesoId Int
   proceso   Proceso  @relation(fields: [procesoId], references: [id], onDelete: Cascade)
-  autorId   String
+  autorId   Int
   autor     Usuario  @relation("AutorObservacion", fields: [autorId], references: [id])
   texto     String
   tipo      String
@@ -388,10 +387,10 @@ model Observacion {
 }
 
 model HistorialCambioProceso {
-  id          String   @id @default(uuid())
-  procesoId   String
+  id          Int      @id @default(autoincrement())
+  procesoId   Int
   proceso     Proceso  @relation(fields: [procesoId], references: [id], onDelete: Cascade)
-  usuarioId   String
+  usuarioId   Int
   usuario     Usuario  @relation(fields: [usuarioId], references: [id])
   tipo        String
   mensaje     String
@@ -400,8 +399,8 @@ model HistorialCambioProceso {
 }
 
 model EventoMaterializado {
-  id              String   @id @default(uuid())
-  riesgoId        String
+  id              Int      @id @default(autoincrement())
+  riesgoId        Int
   riesgo          Riesgo   @relation(fields: [riesgoId], references: [id], onDelete: Cascade)
   descripcion     String
   fecha           DateTime
@@ -412,8 +411,8 @@ model EventoMaterializado {
 }
 
 model Benchmarking {
-  id          String   @id @default(uuid())
-  procesoId   String
+  id          Int      @id @default(autoincrement())
+  procesoId   Int
   proceso     Proceso  @relation(fields: [procesoId], references: [id], onDelete: Cascade)
   entidad     String
   indicador   String
@@ -424,8 +423,8 @@ model Benchmarking {
 }
 
 model Documento {
-  id          String   @id @default(uuid())
-  procesoId   String
+  id          Int      @id @default(autoincrement())
+  procesoId   Int
   proceso     Proceso  @relation(fields: [procesoId], references: [id], onDelete: Cascade)
   nombre      String
   tipo        String   // 'analisis_proceso', 'normatividad', 'contexto', 'dofa', 'benchmarking', 'otro'
@@ -436,4 +435,3 @@ model Documento {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 }
-
