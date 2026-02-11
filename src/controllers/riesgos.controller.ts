@@ -4,7 +4,7 @@ import prisma from '../prisma';
 export const getRiesgos = async (req: Request, res: Response) => {
     const { procesoId, clasificacion, busqueda, page, pageSize, zona } = req.query;
     const where: any = {};
-    if (procesoId) where.procesoId = String(procesoId);
+    if (procesoId) where.procesoId = Number(procesoId);
     if (clasificacion && clasificacion !== 'all') where.clasificacion = String(clasificacion);
     if (zona) where.zona = String(zona);
     if (busqueda) {
@@ -46,7 +46,7 @@ export const getRiesgos = async (req: Request, res: Response) => {
 };
 
 export const getRiesgoById = async (req: Request, res: Response) => {
-    const { id } = req.params;
+    const id = Number(req.params.id);
     try {
         const riesgo = await prisma.riesgo.findUnique({
             where: { id },
@@ -111,7 +111,7 @@ export const createRiesgo = async (req: Request, res: Response) => {
 };
 
 export const updateRiesgo = async (req: Request, res: Response) => {
-    const { id } = req.params;
+    const id = Number(req.params.id);
     const { evaluacion, causas, priorizacion, ...data } = req.body;
     try {
         // 1. Update basic fields
@@ -145,7 +145,7 @@ export const updateRiesgo = async (req: Request, res: Response) => {
 };
 
 export const deleteRiesgo = async (req: Request, res: Response) => {
-    const { id } = req.params;
+    const id = Number(req.params.id);
     try {
         await prisma.riesgo.delete({ where: { id } });
         res.json({ message: 'Riesgo deleted' });
@@ -155,7 +155,7 @@ export const deleteRiesgo = async (req: Request, res: Response) => {
 };
 
 export const getEvaluacionByRiesgoId = async (req: Request, res: Response) => {
-    const { riesgoId } = req.params;
+    const riesgoId = Number(req.params.riesgoId);
     try {
         const evaluacion = await prisma.evaluacionRiesgo.findUnique({
             where: { riesgoId }
@@ -171,7 +171,7 @@ export const getEstadisticas = async (req: Request, res: Response) => {
     const { procesoId } = req.query;
     try {
         const where: any = {};
-        if (procesoId) where.procesoId = String(procesoId);
+        if (procesoId) where.procesoId = Number(procesoId);
 
         const totalRiesgos = await prisma.riesgo.count({ where });
 
@@ -214,7 +214,7 @@ export const getRiesgosRecientes = async (req: Request, res: Response) => {
 
 export const getPuntosMapa = async (req: Request, res: Response) => {
     const where: any = {};
-    if (req.query.procesoId) where.procesoId = String(req.query.procesoId);
+    if (req.query.procesoId) where.procesoId = Number(req.query.procesoId);
 
     try {
         const riesgos = await prisma.riesgo.findMany({

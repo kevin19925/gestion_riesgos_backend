@@ -13,7 +13,7 @@ export const getUsuarios = async (req: Request, res: Response) => {
 };
 
 export const getUsuarioById = async (req: Request, res: Response) => {
-    const { id } = req.params;
+    const id = Number(req.params.id);
     try {
         const user = await prisma.usuario.findUnique({
             where: { id },
@@ -35,7 +35,7 @@ export const createUsuario = async (req: Request, res: Response) => {
                 email,
                 password: password || 'comware123',
                 role,
-                cargoId,
+                cargoId: cargoId ? Number(cargoId) : null,
                 activo: activo ?? true
             },
             include: { cargo: true }
@@ -48,7 +48,7 @@ export const createUsuario = async (req: Request, res: Response) => {
 };
 
 export const updateUsuario = async (req: Request, res: Response) => {
-    const { id } = req.params;
+    const id = Number(req.params.id);
     try {
         const { nombre, email, password, role, cargoId, activo } = req.body;
         const user = await prisma.usuario.update({
@@ -58,7 +58,7 @@ export const updateUsuario = async (req: Request, res: Response) => {
                 email,
                 password,
                 role,
-                cargoId,
+                cargoId: cargoId ? Number(cargoId) : null,
                 activo
             },
             include: { cargo: true }
@@ -71,7 +71,7 @@ export const updateUsuario = async (req: Request, res: Response) => {
 };
 
 export const deleteUsuario = async (req: Request, res: Response) => {
-    const { id } = req.params;
+    const id = Number(req.params.id);
     try {
         await prisma.usuario.delete({
             where: { id }

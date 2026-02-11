@@ -68,7 +68,7 @@ export const getMapaConfig = async (req: Request, res: Response) => {
     console.log('GET /catalogos/mapa-config');
     try {
         const mapaConfigs = await prisma.mapaConfig.findFirst({
-            where: { id: 'default-config' }
+            where: { id: 1 }
         });
         console.log('Mapa config found:', mapaConfigs ? 'Yes' : 'No');
 
@@ -213,7 +213,7 @@ export const getEjesMapa = async (req: Request, res: Response) => {
 };
 
 export const updateConfiguracion = async (req: Request, res: Response) => {
-    const { id } = req.params;
+    const id = Number(req.params.id);
     const body = req.body;
     try {
         const updated = await prisma.configuracion.update({
@@ -233,7 +233,7 @@ export const updateMapaConfig = async (req: Request, res: Response) => {
     try {
         // Get existing config
         const existing = await prisma.mapaConfig.findFirst({
-            where: { id: 'default-config' }
+            where: { id: 1 }
         });
 
         // Parse existing ejes or create default structure
@@ -246,9 +246,9 @@ export const updateMapaConfig = async (req: Request, res: Response) => {
 
         // Save back
         const updated = await prisma.mapaConfig.upsert({
-            where: { id: 'default-config' },
+            where: { id: 1 },
             create: {
-                id: 'default-config',
+                id: 1,
                 nombre: 'Configuración por Defecto',
                 ejes: JSON.stringify(ejesObj)
             },
