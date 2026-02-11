@@ -1,0 +1,430 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ============================================
+// Modelos de Seguridad y Usuarios
+// ============================================
+
+model Usuario {
+  id        String   @id @default(uuid())
+  nombre    String
+  email     String   @unique
+  password  String   // Encriptada
+  role      String   // 'admin', 'dueño_procesos', 'supervisor', 'gerente_general'
+  cargoId   String?
+  cargo     Cargo?   @relation(fields: [cargoId], references: [id])
+  activo    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relaciones
+  procesosResponsable Proceso[] @relation("ResponsableProceso")
+  areasDirector       Area[]    @relation("DirectorArea")
+  
+  notificaciones      Notificacion[]
+  tareas              Tarea[]
+  observaciones       Observacion[] @relation("AutorObservacion")
+  historialCambios    HistorialCambioProceso[]
+  procesosParticipantes Proceso[] @relation("Participantes")
+}
+
+model Cargo {
+  id        String    @id @default(uuid())
+  nombre    String    @unique
+  usuarios  Usuario[]
+}
+
+model Area {
+  id          String   @id @default(uuid())
+  nombre      String   @unique
+  descripcion String?
+  directorId  String?
+  director    Usuario? @relation("DirectorArea", fields: [directorId], references: [id])
+  activo      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  procesos    Proceso[]
+}
+
+// ============================================
+// Modelos Principales del Sistema
+// ============================================
+
+model Proceso {
+  id              String   @id @default(uuid())
+  nombre          String   @unique
+  descripcion     String?
+  objetivo        String?
+  tipo            String?  // Estratégico, Operacional, etc.
+  
+  responsableId   String
+  responsable     Usuario  @relation("ResponsableProceso", fields: [responsableId], references: [id])
+  
+  areaId          String
+  area            Area     @relation(fields: [areaId], references: [id])
+  
+  // Campos adicionales para reportes
+  vicepresidencia String?
+  gerencia        String?
+  
+  estado          String   @default("borrador") // borrador, en_revision, aprobado
+  activo          Boolean  @default(true)
+  
+  // Análisis y documentación
+  analisis        String?  @db.Text
+  documentoUrl    String?
+  documentoNombre String?
+
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  riesgos         Riesgo[]
+  observaciones   Observacion[]
+  historial       HistorialCambioProceso[]
+  
+  // Detalle del Proceso
+  dofaItems       DofaItem[]
+  normatividades  Normatividad[]
+  contextos       Contexto[]
+  benchmarking    Benchmarking[]
+  participantes   Usuario[] @relation("Participantes")
+  documentos      Documento[]
+}
+
+model DofaItem {
+  id          String   @id @default(uuid())
+  procesoId   String
+  proceso     Proceso  @relation(fields: [procesoId], references: [id], onDelete: Cascade)
+  tipo        String   // FORTALEZA, OPORTUNIDAD, DEBILIDAD, AMENAZA, FO, FA, DO, DA
+  descripcion String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model Normatividad {
+  id                    String   @id @default(uuid())
+  procesoId             String
+  proceso               Proceso  @relation(fields: [procesoId], references: [id], onDelete: Cascade)
+  numero                Int
+  nombre                String
+  estado                String   // Proyecto, Requerida, Existente
+  regulador             String?
+  sanciones             String?
+  plazoImplementacion   String?
+  cumplimiento          String?  // Total, Parcial, No cumple
+  detalleIncumplimiento String?
+  riesgoIdentificado    String?
+  clasificacion         String?  // Positiva, Negativa
+  comentarios           String?
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+}
+
+model Contexto {
+  id          String   @id @default(uuid())
+  procesoId   String
+  proceso     Proceso  @relation(fields: [procesoId], references: [id], onDelete: Cascade)
+  tipo        String   // INTERNO, EXTERNO
+  descripcion String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model Riesgo {
+  id              String   @id @default(uuid())
+  procesoId       String
+  proceso         Proceso  @relation(fields: [procesoId], references: [id])
+  numero          Int
+  descripcion     String
+  clasificacion   String? // Negativa, Positiva
+  zona            String?
+  numeroIdentificacion String? // ID visual con siglas (ej: 1GTH)
+  
+  // Clasificación y Tipología
+  tipologiaNivelI String?
+  tipologiaNivelII String?
+  
+  // Relaciones con catálogos (opcionalmente normalizado)
+  tipoRiesgoId    String?
+  tipoRiesgo      TipoRiesgo? @relation(fields: [tipoRiesgoId], references: [id])
+  
+  subtipoRiesgoId String?
+  subtipoRiesgo   SubtipoRiesgo? @relation(fields: [subtipoRiesgoId], references: [id])
+  
+  objetivoId      String?
+  objetivo        Objetivo? @relation(fields: [objetivoId], references: [id])
+  
+  // Campos de Texto para compatibilidad o flexibilidad
+  causaRiesgo     String? // Texto resumen
+  fuenteCausa     String? // Texto resumen
+  origen          String?
+  
+  vicepresidenciaGerenciaAlta String?
+  siglaVicepresidencia String?
+  gerencia        String?
+  siglaGerencia   String?
+
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  
+  // Relaciones Uno a Uno / Uno a Muchos
+  evaluacion      EvaluacionRiesgo?
+  causas          CausaRiesgo[]
+  priorizacion    PriorizacionRiesgo?
+  eventosMaterializados EventoMaterializado[]
+  // mapaPunto       PuntoMapa? // Se puede derivar de Evaluación
+
+  @@unique([procesoId, numero])
+}
+
+model CausaRiesgo {
+  id              String   @id @default(uuid())
+  riesgoId        String
+  riesgo          Riesgo   @relation(fields: [riesgoId], references: [id], onDelete: Cascade)
+  descripcion     String
+  fuenteCausa     String? // 'Personas', 'Procesos', 'Externos'...
+  
+  // Atributos específicos
+  frecuencia      String? // 'Probable', 'Posible'...
+  seleccionada    Boolean @default(false)
+  orden           Int?
+  
+  // Relaciones con Controles
+  controles       ControlRiesgo[]
+}
+
+model ControlRiesgo {
+  id              String      @id @default(uuid())
+  causaRiesgoId   String
+  causaRiesgo     CausaRiesgo @relation(fields: [causaRiesgoId], references: [id], onDelete: Cascade)
+  descripcion     String
+  tipoControl     String?     // AUTOMATICO, MANUAL...
+  responsable     String?
+  
+  // Calificación del control (Puntajes)
+  aplicabilidad   Int?
+  cobertura       Int?
+  facilidadUso    Int?
+  segregacion     Int?
+  naturaleza      Int?
+  desviaciones    Int?
+  puntajeControl  Int?
+  
+  evaluacionPreliminar String?
+  evaluacionDefinitiva String?
+  
+  estandarizacionPorcentajeMitigacion Int?
+  
+  // Campos para persistencia de cálculo residual
+  disminuyeFrecuenciaImpactoAmbas String? // FRECUENCIA, IMPACTO, AMBAS
+}
+
+model EvaluacionRiesgo {
+  id                  String   @id @default(uuid())
+  riesgoId            String   @unique
+  riesgo              Riesgo   @relation(fields: [riesgoId], references: [id], onDelete: Cascade)
+  
+  impactoPersonas     Int
+  impactoLegal        Int
+  impactoAmbiental    Int
+  impactoProcesos     Int
+  impactoReputacion   Int
+  impactoEconomico    Int
+  impactoTecnologico  Int
+  probabilidad        Int
+  
+  impactoGlobal       Int
+  impactoMaximo       Int
+  riesgoInherente     Int
+  nivelRiesgo         String
+  
+  // Residual Values
+  probabilidadResidual Int?
+  impactoResidual      Int?
+  riesgoResidual       Int?
+  nivelRiesgoResidual  String?
+  
+  evaluadoPor         String?
+  fechaEvaluacion     DateTime @default(now())
+}
+
+model PriorizacionRiesgo {
+  id                  String   @id @default(uuid())
+  riesgoId            String   @unique
+  riesgo              Riesgo   @relation(fields: [riesgoId], references: [id], onDelete: Cascade)
+  
+  calificacionFinal   Int?
+  respuesta           String? // Aceptar, Mitigar, Transferir...
+  responsable         String?
+  puntajePriorizacion Int?
+  fechaAsignacion     DateTime @default(now())
+  
+  planesAccion        PlanAccion[]
+}
+
+model PlanAccion {
+  id                  String   @id @default(uuid())
+  priorizacionId      String
+  priorizacion        PriorizacionRiesgo @relation(fields: [priorizacionId], references: [id], onDelete: Cascade)
+  descripcion         String
+  responsable         String?
+  fechaInicio         DateTime?
+  fechaFin            DateTime?
+  estado              String // Pendiente, En Progreso, Completado
+}
+
+// ============================================
+// Catálogos y Configuración
+// ============================================
+
+model TipoRiesgo {
+  id          String   @id @default(uuid())
+  codigo      String   @unique
+  nombre      String   @unique
+  descripcion String?
+  subtipos    SubtipoRiesgo[]
+  riesgos     Riesgo[]
+}
+
+model SubtipoRiesgo {
+  id           String     @id @default(uuid())
+  codigo       String?
+  nombre       String
+  descripcion  String?
+  tipoRiesgoId String
+  tipoRiesgo   TipoRiesgo @relation(fields: [tipoRiesgoId], references: [id], onDelete: Cascade)
+  riesgos      Riesgo[]
+
+  @@unique([nombre, tipoRiesgoId], name: "nombre_tipo")
+}
+
+model Objetivo {
+  id          String   @id @default(uuid())
+  codigo      String   @unique
+  descripcion String   @unique
+  riesgos     Riesgo[]
+}
+
+model Formula {
+  id          String   @id @default(uuid())
+  nombre      String   @unique
+  descripcion String?
+  formula     String
+  categoria   String?
+  activa      Boolean  @default(true)
+  variables   String[]
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model MapaConfig {
+  id          String   @id @default(uuid())
+  nombre      String
+  ejes        String? // JSON storing X and Y definitions
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model Configuracion {
+  id          String   @id @default(uuid())
+  clave       String   @unique
+  valor       String
+  tipo        String
+  descripcion String?
+}
+
+// ============================================
+// Utilidades: Notificaciones, Tareas, Obs
+// ============================================
+
+model Notificacion {
+  id        String   @id @default(uuid())
+  usuarioId String
+  usuario   Usuario  @relation(fields: [usuarioId], references: [id])
+  titulo    String
+  mensaje   String
+  leida     Boolean  @default(false)
+  tipo      String
+  createdAt DateTime @default(now())
+}
+
+model Tarea {
+  id          String   @id @default(uuid())
+  usuarioId   String
+  usuario     Usuario  @relation(fields: [usuarioId], references: [id])
+  titulo      String
+  descripcion String
+  estado      String
+  prioridad   String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model Observacion {
+  id        String   @id @default(uuid())
+  procesoId String
+  proceso   Proceso  @relation(fields: [procesoId], references: [id], onDelete: Cascade)
+  autorId   String
+  autor     Usuario  @relation("AutorObservacion", fields: [autorId], references: [id])
+  texto     String
+  tipo      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model HistorialCambioProceso {
+  id          String   @id @default(uuid())
+  procesoId   String
+  proceso     Proceso  @relation(fields: [procesoId], references: [id], onDelete: Cascade)
+  usuarioId   String
+  usuario     Usuario  @relation(fields: [usuarioId], references: [id])
+  tipo        String
+  mensaje     String
+  fecha       DateTime @default(now())
+  cambios     String?  // JSON string
+}
+
+model EventoMaterializado {
+  id              String   @id @default(uuid())
+  riesgoId        String
+  riesgo          Riesgo   @relation(fields: [riesgoId], references: [id], onDelete: Cascade)
+  descripcion     String
+  fecha           DateTime
+  impactoEconomico Float?
+  planAccion      String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+model Benchmarking {
+  id          String   @id @default(uuid())
+  procesoId   String
+  proceso     Proceso  @relation(fields: [procesoId], references: [id], onDelete: Cascade)
+  entidad     String
+  indicador   String
+  valor       String
+  comparacion String // Mejor, Igual, Peor
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model Documento {
+  id          String   @id @default(uuid())
+  procesoId   String
+  proceso     Proceso  @relation(fields: [procesoId], references: [id], onDelete: Cascade)
+  nombre      String
+  tipo        String   // 'analisis_proceso', 'normatividad', 'contexto', 'dofa', 'benchmarking', 'otro'
+  url         String?
+  contenido   String?  @db.Text
+  tamaño      Int?     // bytes
+  formato     String?  // 'pdf', 'docx', 'xlsx', etc
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
