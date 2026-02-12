@@ -75,11 +75,11 @@ model Proceso {
   objetivo        String?
   tipo            String?  // Estratégico, Operacional, etc.
   
-  responsableId   Int
-  responsable     Usuario  @relation("ResponsableProceso", fields: [responsableId], references: [id])
+  responsableId   Int?
+  responsable     Usuario? @relation("ResponsableProceso", fields: [responsableId], references: [id])
   
-  areaId          Int
-  area            Area     @relation(fields: [areaId], references: [id])
+  areaId          Int?
+  area            Area?    @relation(fields: [areaId], references: [id])
   
   // Campos adicionales para reportes
   vicepresidencia String?
