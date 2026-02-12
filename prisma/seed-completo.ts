@@ -178,62 +178,67 @@ async function main() {
 
     // 6. CREAR CATÁLOGOS - TipoRiesgo
     console.log('📚 Creando catálogos de tipos de riesgo...')
-    const tiposRiesgoData = [
+    const tiposRiesgoConfig = [
         {
             codigo: '1',
             nombre: 'Estratégico',
             descripcion: 'Son los riesgos de fallar en la implementación del plan estratégico',
-            subtipos: {
-                create: [
-                    { codigo: '1', nombre: 'alianzas', descripcion: 'Alianzas comerciales ineficientes' },
-                    { codigo: '2', nombre: 'alineación estratégica', descripcion: 'Falta de alineación estratégica' },
-                    { codigo: '3', nombre: 'canales de distribución', descripcion: 'Fallas en canales de distribución' },
-                    { codigo: '15', nombre: 'talento humano', descripcion: 'Riesgo de falta de talento clave' }
-                ]
-            }
+            subtiposList: [
+                { codigo: '1', nombre: 'alianzas', descripcion: 'Alianzas comerciales ineficientes' },
+                { codigo: '2', nombre: 'alineación estratégica', descripcion: 'Falta de alineación estratégica' },
+                { codigo: '3', nombre: 'canales de distribución', descripcion: 'Fallas en canales de distribución' },
+                { codigo: '15', nombre: 'talento humano', descripcion: 'Riesgo de falta de talento clave' }
+            ]
         },
         {
             codigo: '2',
             nombre: 'Operacional',
             descripcion: 'Riesgos relacionados con fallas en procesos, personas y/o tecnología',
-            subtipos: {
-                create: [
-                    { codigo: '1', nombre: 'ambiental', descripcion: 'Riesgos asociados a daños ambientales' },
-                    { codigo: '2', nombre: 'físico', descripcion: 'Riesgo de pérdida de activos físicos' },
-                    { codigo: '6', nombre: 'proceso', descripcion: 'Riesgos en procesos operativos' },
-                    { codigo: '9', nombre: 'sistemas', descripcion: 'Riesgos en sistemas de TI' }
-                ]
-            }
+            subtiposList: [
+                { codigo: '1', nombre: 'ambiental', descripcion: 'Riesgos asociados a daños ambientales' },
+                { codigo: '2', nombre: 'físico', descripcion: 'Riesgo de pérdida de activos físicos' },
+                { codigo: '6', nombre: 'proceso', descripcion: 'Riesgos en procesos operativos' },
+                { codigo: '9', nombre: 'sistemas', descripcion: 'Riesgos en sistemas de TI' }
+            ]
         },
         {
             codigo: '3',
             nombre: 'Financiero',
             descripcion: 'Riesgos relacionados con aspectos financieros',
-            subtipos: {
-                create: [
-                    { codigo: '1', nombre: 'contable', descripcion: 'Riesgo contable' },
-                    { codigo: '2', nombre: 'crédito', descripcion: 'Riesgo de crédito' },
-                    { codigo: '5', nombre: 'mercado', descripcion: 'Riesgo de mercado' }
-                ]
-            }
+            subtiposList: [
+                { codigo: '1', nombre: 'contable', descripcion: 'Riesgo contable' },
+                { codigo: '2', nombre: 'crédito', descripcion: 'Riesgo de crédito' },
+                { codigo: '5', nombre: 'mercado', descripcion: 'Riesgo de mercado' }
+            ]
         },
         {
             codigo: '4',
             nombre: 'Cumplimiento',
             descripcion: 'Riesgos relacionados con cumplimiento normativo',
-            subtipos: {
-                create: [
-                    { codigo: '1', nombre: 'gobierno corporativo', descripcion: 'Incumplimiento de gobierno corporativo' },
-                    { codigo: '3', nombre: 'legal', descripcion: 'Riesgo legal' },
-                    { codigo: '5', nombre: 'regulatorio', descripcion: 'Riesgo regulatorio' }
-                ]
-            }
+            subtiposList: [
+                { codigo: '1', nombre: 'gobierno corporativo', descripcion: 'Incumplimiento de gobierno corporativo' },
+                { codigo: '3', nombre: 'legal', descripcion: 'Riesgo legal' },
+                { codigo: '5', nombre: 'regulatorio', descripcion: 'Riesgo regulatorio' }
+            ]
         }
     ]
 
-    for (const tipoData of tiposRiesgoData) {
-        await prisma.tipoRiesgo.create({ data: tipoData as any })
+    // Create TipoRiesgo with nested subtipos
+    for (const tipoConfig of tiposRiesgoConfig) {
+        const { subtiposList, ...tipoData } = tipoConfig
+        const tipo = await prisma.tipoRiesgo.create({
+            data: {
+                ...tipoData,
+                subtipos: {
+                    createMany: {
+                        data: subtiposList
+                    }
+                }
+            }
+        })
+        console.log(`  ✓ Tipo "${tipo.nombre}" con ${subtiposList.length} subtipos`)
     }
+    
     const allTiposRiesgo = await prisma.tipoRiesgo.findMany({ include: { subtipos: true } })
     console.log(`✅ ${allTiposRiesgo.length} tipos de riesgo creados\n`)
 
