@@ -110,6 +110,12 @@ export const updateProceso = async (req: Request, res: Response) => {
     try {
         const updateData: any = { ...rest };
 
+        // Mapear objetivoProceso (DTO del frontend) al campo real "objetivo" del modelo Proceso
+        if (updateData.objetivoProceso !== undefined) {
+            updateData.objetivo = updateData.objetivoProceso;
+            delete updateData.objetivoProceso;
+        }
+
         if (responsableId) updateData.responsableId = Number(responsableId);
         if (areaId) updateData.areaId = Number(areaId);
 
