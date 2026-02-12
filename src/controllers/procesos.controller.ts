@@ -162,6 +162,40 @@ export const deleteProceso = async (req: Request, res: Response) => {
         res.status(500).json({ error: 'Error deleting proceso' });
     }
 };
+export const bulkUpdateProcesos = async (req: Request, res: Response) => {
+    console.log('[BACKEND] bulkUpdateProcesos');
+    const procesos = req.body;
+    try {
+        if (!Array.isArray(procesos)) {
+            return res.status(400).json({ error: 'Expected array of procesos' });
+        }
+
+        const updated = await Promise.all(
+            procesos.map(p =>
+                prisma.proceso.update({
+                    where: { id: Number(p.id) },
+                    data: {
+                        responsableId: p.responsableId ? Number(p.responsableId) : null,
+                        areaId: p.areaId ? Number(p.areaId) : null,
+                        nombre: p.nombre,
+                        descripcion: p.descripcion,
+                        objetivo: p.objetivo,
+                        tipo: p.tipo,
+                        estado: p.estado
+                    }
+                })
+            )
+        );
+        res.json(updated);
+    } catch (error) {
+        console.error('[BACKEND] Error in bulkUpdateProcesos:', error);
+        res.status(500).json({
+            error: 'Error updating procesos',
+            details: error instanceof Error ? error.message : String(error)
+        });
+    }
+};
+
 export const duplicateProceso = async (req: Request, res: Response) => {
     const id = Number(req.params.id);
     console.log(`[BACKEND] duplicateProceso - id: ${id}`);

@@ -10,7 +10,7 @@ export const login = async (req: Request, res: Response) => {
             where: {
                 OR: [
                     { email: username },
-                    { email: `${username}@comware.com.ec` }
+                    { email: `${username}@comware.com.co` }
                 ],
                 password: password
             },
