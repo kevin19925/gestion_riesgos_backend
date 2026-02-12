@@ -27,26 +27,8 @@ export const getTipologias = async (req: Request, res: Response) => {
         const tipologias = await prisma.tipoRiesgo.findMany({
             include: { subtipos: true }
         });
-        const transformed = [
-            {
-                id: '1',
-                nombre: 'Tipologías Nivel I',
-                nivel: 'I',
-                categorias: tipologias.map((t: any) => ({
-                    id: t.id,
-                    codigo: t.codigo,
-                    descripcion: t.nombre,
-                    subtipos: t.subtipos.map((s: any) => ({
-                        id: s.id,
-                        codigo: s.codigo,
-                        nombre: s.nombre,
-                        descripcion: s.descripcion
-                    }))
-                })),
-                activa: true
-            }
-        ];
-        res.json(transformed);
+        // Return tipos de riesgo directly with their subtipos
+        res.json(tipologias);
     } catch (error) {
         res.status(500).json({ error: 'Error fetching tipologias' });
     }
