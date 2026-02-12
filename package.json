@@ -10,7 +10,8 @@
     "postinstall": "npx prisma generate && tsc",
     "lint": "eslint src/**/*.ts",
     "test": "jest",
-    "seed": "npx tsx prisma/seed.ts"
+    "seed": "npx tsx prisma/seed-completo.ts",
+    "seed:basic": "npx tsx prisma/seed.ts"
   },
   "keywords": [
     "node",

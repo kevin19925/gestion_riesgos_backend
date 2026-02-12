@@ -32,6 +32,7 @@ model Usuario {
   observaciones       Observacion[] @relation("AutorObservacion")
   historialCambios    HistorialCambioProceso[]
   procesosParticipantes Proceso[] @relation("Participantes")
+  incidenciasResponsable Incidencia[]
 }
 
 model Cargo {
@@ -106,6 +107,7 @@ model Proceso {
   benchmarking    Benchmarking[]
   participantes   Usuario[] @relation("Participantes")
   documentos      Documento[]
+  incidencias     Incidencia[]
 }
 
 model DofaItem {
@@ -189,6 +191,9 @@ model Riesgo {
   causas          CausaRiesgo[]
   priorizacion    PriorizacionRiesgo?
   eventosMaterializados EventoMaterializado[]
+  incidencias     Incidencia[]
+  controles       Control[]
+  planesAccion    PlanAccion[]
 
   @@unique([procesoId, numero])
 }
@@ -204,6 +209,10 @@ model CausaRiesgo {
   frecuencia      String? // 'Probable', 'Posible'...
   seleccionada    Boolean @default(false)
   orden           Int?
+
+  // Gestión de control/plan (persistencia flexible)
+  tipoGestion     String?
+  gestion         Json?
   
   // Relaciones con Controles
   controles       ControlRiesgo[]
@@ -280,13 +289,66 @@ model PriorizacionRiesgo {
 
 model PlanAccion {
   id                  Int      @id @default(autoincrement())
-  priorizacionId      Int
-  priorizacion        PriorizacionRiesgo @relation(fields: [priorizacionId], references: [id], onDelete: Cascade)
+  priorizacionId      Int?
+  priorizacion        PriorizacionRiesgo? @relation(fields: [priorizacionId], references: [id], onDelete: Cascade)
+  riesgoId            Int?
+  incidenciaId        Int?
+  riesgo              Riesgo?     @relation(fields: [riesgoId], references: [id], onDelete: SetNull)
+  incidencia          Incidencia? @relation(fields: [incidenciaId], references: [id], onDelete: SetNull)
+  nombre              String?
+  objetivo            String?
   descripcion         String
   responsable         String?
   fechaInicio         DateTime?
   fechaFin            DateTime?
+  fechaProgramada     DateTime?
+  fechaEjecucion      DateTime?
   estado              String // Pendiente, En Progreso, Completado
+  prioridad           Int?    // 1-5
+  presupuesto         Float?
+  porcentajeAvance    Int?
+  observaciones       String?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+}
+
+model Control {
+  id                   Int      @id @default(autoincrement())
+  riesgoId             Int
+  riesgo               Riesgo   @relation(fields: [riesgoId], references: [id], onDelete: Cascade)
+  descripcion          String?
+  tipoControl          String?
+  diseño               Int
+  ejecucion            Int
+  solidez              Int
+  efectividad          Float
+  riesgoResidual       Float
+  clasificacionResidual String
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+}
+
+model Incidencia {
+  id              Int      @id @default(autoincrement())
+  codigo          String?  @unique
+  riesgoId        Int?
+  riesgo          Riesgo?  @relation(fields: [riesgoId], references: [id], onDelete: SetNull)
+  procesoId       Int?
+  proceso         Proceso? @relation(fields: [procesoId], references: [id], onDelete: SetNull)
+  titulo          String?
+  descripcion     String
+  estado          String
+  fechaOcurrencia DateTime
+  fechaReporte    DateTime?
+  fechaResolucion DateTime?
+  reportadoPor    String?
+  responsableId   Int?
+  responsable     Usuario? @relation(fields: [responsableId], references: [id], onDelete: SetNull)
+  accionesCorrectivas String?
+  impactosMaterializacion Json?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  planesAccion    PlanAccion[]
 }
 
 // ============================================
@@ -319,6 +381,46 @@ model Objetivo {
   codigo      String   @unique
   descripcion String   @unique
   riesgos     Riesgo[]
+}
+
+model FrecuenciaCatalog {
+  id          Int    @id @default(autoincrement())
+  label       String @unique
+  descripcion String
+}
+
+model FuenteCatalog {
+  id     Int    @id @default(autoincrement())
+  nombre String @unique
+}
+
+model OrigenCatalog {
+  id     Int    @id @default(autoincrement())
+  codigo String? @unique
+  nombre String @unique
+}
+
+model ConsecuenciaCatalog {
+  id     Int    @id @default(autoincrement())
+  codigo String? @unique
+  nombre String @unique
+}
+
+model ImpactoTipo {
+  id     Int    @id @default(autoincrement())
+  clave  String @unique
+  nombre String @unique
+  niveles ImpactoNivel[]
+}
+
+model ImpactoNivel {
+  id            Int    @id @default(autoincrement())
+  impactoTipoId Int
+  impactoTipo   ImpactoTipo @relation(fields: [impactoTipoId], references: [id], onDelete: Cascade)
+  nivel         Int
+  descripcion   String
+
+  @@unique([impactoTipoId, nivel])
 }
 
 model Formula {
@@ -416,10 +518,15 @@ model Benchmarking {
   id          Int      @id @default(autoincrement())
   procesoId   Int
   proceso     Proceso  @relation(fields: [procesoId], references: [id], onDelete: Cascade)
-  entidad     String
-  indicador   String
-  valor       String
-  comparacion String // Mejor, Igual, Peor
+  entidad     String?
+  indicador   String?
+  valor       String?
+  comparacion String? // Mejor, Igual, Peor
+  empresa     String?
+  numero      Int?
+  riesgo      String?
+  clasificacion String?
+  calificacion Int?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 }

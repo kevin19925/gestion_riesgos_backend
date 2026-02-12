@@ -10,6 +10,7 @@ export const getProcesos = async (req: Request, res: Response) => {
                 area: {
                     include: { director: true }
                 },
+                participantes: true,
             },
             orderBy: { createdAt: 'desc' }
         });
@@ -34,7 +35,8 @@ export const getProcesoById = async (req: Request, res: Response) => {
                 riesgos: true,
                 dofaItems: true,
                 normatividades: true,
-                contextos: true
+                contextos: true,
+                participantes: true,
             }
         });
         if (!proceso) return res.status(404).json({ error: 'Proceso not found' });
@@ -49,28 +51,38 @@ export const createProceso = async (req: Request, res: Response) => {
     console.log('[BACKEND] createProceso - body:', JSON.stringify(req.body, null, 2));
     const { nombre, descripcion, objetivo, tipo, responsableId, areaId, ...rest } = req.body;
     try {
+        const data: any = {
+            nombre,
+            descripcion,
+            objetivo,
+            tipo,
+            responsableId: responsableId ? Number(responsableId) : null,
+            areaId: areaId ? Number(areaId) : null,
+        };
+
+        // Solo agregar campos opcionales si vienen y no son nulos
+        if (req.body.vicepresidencia) data.vicepresidencia = req.body.vicepresidencia;
+        if (req.body.gerencia) data.gerencia = req.body.gerencia;
+        if (req.body.estado) data.estado = req.body.estado;
+        if (req.body.activo !== undefined) data.activo = Boolean(req.body.activo);
+
         const nuevoProceso = await prisma.proceso.create({
-            data: {
-                nombre,
-                descripcion,
-                objetivo,
-                tipo,
-                responsableId: responsableId ? Number(responsableId) : null,
-                areaId: areaId ? Number(areaId) : null,
-                ...rest
-            }
+            data
         });
         res.json(nuevoProceso);
     } catch (error) {
         console.error('[BACKEND] Error in createProceso:', error);
-        res.status(500).json({ error: 'Error creating proceso' });
+        res.status(500).json({
+            error: 'Error creating proceso',
+            details: error instanceof Error ? error.message : String(error)
+        });
     }
 };
 
 export const updateProceso = async (req: Request, res: Response) => {
     const id = Number(req.params.id);
     console.log(`[BACKEND] updateProceso - id: ${id}`);
-    const { dofaItems, normatividades, contextos, id: bodyId, responsableId, areaId, ...rest } = req.body;
+    const { dofaItems, normatividades, contextos, participantesIds, id: bodyId, responsableId, areaId, ...rest } = req.body;
     try {
         const updateData: any = { ...rest };
 
@@ -116,13 +128,20 @@ export const updateProceso = async (req: Request, res: Response) => {
             };
         }
 
+        if (participantesIds) {
+            updateData.participantes = {
+                set: (participantesIds as string[]).map((id) => ({ id: Number(id) }))
+            };
+        }
+
         const proceso = await prisma.proceso.update({
             where: { id },
             data: updateData,
             include: {
                 dofaItems: true,
                 normatividades: true,
-                contextos: true
+                contextos: true,
+                participantes: true,
             }
         });
         res.json(proceso);
