@@ -19,11 +19,17 @@ function calcularRiesgoInherente(impactoPromedio: number, probabilidad: number):
 }
 
 // Helper: Clasificar riesgo por valor
+// Según documento Proceso_Calificacion_Inherente_Global.md
+// Zonas: 15-25 CRÍTICO, 10-14 ALTO, 4-9 MEDIO, 1-3 BAJO
+// Excepción: 2x2 = 3.99 (cae en zona baja)
 function clasificarRiesgo(valor: number): string {
-  if (valor <= 25) return 'BAJO';
-  if (valor <= 50) return 'MEDIO';
-  if (valor <= 75) return 'ALTO';
-  return 'CRÍTICO';
+  // Aplicar excepción 2x2 = 3.99
+  if (valor >= 3.99 && valor < 4) return 'BAJO';
+  
+  if (valor >= 15 && valor <= 25) return 'CRÍTICO';
+  if (valor >= 10 && valor <= 14) return 'ALTO';
+  if (valor >= 4 && valor <= 9) return 'MEDIO';
+  return 'BAJO'; // 1-3 (incluye 3.99)
 }
 
 export const getEvaluacionesByRiesgo = async (req: Request, res: Response) => {
