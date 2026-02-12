@@ -175,13 +175,30 @@ export const bulkUpdateProcesos = async (req: Request, res: Response) => {
                 const updateData: any = {};
                 
                 // Only include fields if they're provided
-                if (p.responsableId !== undefined) updateData.responsableId = p.responsableId ? Number(p.responsableId) : null;
-                if (p.areaId !== undefined) updateData.areaId = p.areaId ? Number(p.areaId) : null;
+                if (p.responsableId !== undefined) {
+                    // Handle null, empty string, 0, or valid numbers
+                    if (p.responsableId === null || p.responsableId === '' || p.responsableId === 0 || p.responsableId === '0') {
+                        updateData.responsableId = null;
+                    } else {
+                        updateData.responsableId = Number(p.responsableId);
+                    }
+                }
+                
+                if (p.areaId !== undefined) {
+                    if (p.areaId === null || p.areaId === '' || p.areaId === 0 || p.areaId === '0') {
+                        updateData.areaId = null;
+                    } else {
+                        updateData.areaId = Number(p.areaId);
+                    }
+                }
+                
                 if (p.nombre !== undefined) updateData.nombre = p.nombre;
                 if (p.descripcion !== undefined) updateData.descripcion = p.descripcion;
                 if (p.objetivo !== undefined) updateData.objetivo = p.objetivo;
                 if (p.tipo !== undefined) updateData.tipo = p.tipo;
                 if (p.estado !== undefined) updateData.estado = p.estado;
+                
+                console.log(`[BACKEND] Updating proceso ${p.id} with:`, updateData);
                 
                 return prisma.proceso.update({
                     where: { id: Number(p.id) },
