@@ -14,7 +14,14 @@ export const getProcesos = async (req: Request, res: Response) => {
             },
             orderBy: { createdAt: 'desc' }
         });
-        res.json(procesos);
+        
+        // Mapear para agregar areaNombre para facilitar uso en frontend
+        const procesosConAreaNombre = procesos.map(p => ({
+            ...p,
+            areaNombre: p.area?.nombre || null
+        }));
+        
+        res.json(procesosConAreaNombre);
     } catch (error) {
         console.error('[BACKEND] Error in getProcesos:', error);
         res.status(500).json({ error: 'Error fetching procesos' });
