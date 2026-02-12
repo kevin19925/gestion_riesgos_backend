@@ -52,6 +52,90 @@ export const getTipologias = async (req: Request, res: Response) => {
     }
 };
 
+export const createTipologia = async (req: Request, res: Response) => {
+    try {
+        const { nombre, codigo, descripcion } = req.body;
+        const newTipologia = await prisma.tipoRiesgo.create({
+            data: { nombre, codigo, descripcion }
+        });
+        res.status(201).json(newTipologia);
+    } catch (error) {
+        res.status(500).json({ error: 'Error creating tipologia' });
+    }
+};
+
+export const updateTipologia = async (req: Request, res: Response) => {
+    const id = Number(req.params.id);
+    try {
+        const { nombre, codigo, descripcion } = req.body;
+        const updated = await prisma.tipoRiesgo.update({
+            where: { id },
+            data: { nombre, codigo, descripcion }
+        });
+        res.json(updated);
+    } catch (error) {
+        res.status(500).json({ error: 'Error updating tipologia' });
+    }
+};
+
+export const deleteTipologia = async (req: Request, res: Response) => {
+    const id = Number(req.params.id);
+    try {
+        await prisma.tipoRiesgo.delete({ where: { id } });
+        res.status(204).send();
+    } catch (error) {
+        res.status(500).json({ error: 'Error deleting tipologia' });
+    }
+};
+
+export const createSubtipo = async (req: Request, res: Response) => {
+    try {
+        const { tipoRiesgoId, nombre, descripcion, codigo } = req.body;
+        if (!tipoRiesgoId || !nombre) {
+            return res.status(400).json({ error: 'tipoRiesgoId y nombre son requeridos' });
+        }
+        const subtipo = await prisma.subtipoRiesgo.create({
+            data: {
+                tipoRiesgoId: Number(tipoRiesgoId),
+                nombre,
+                descripcion: descripcion || null,
+                codigo: codigo || null
+            }
+        });
+        res.status(201).json(subtipo);
+    } catch (error) {
+        res.status(500).json({ error: 'Error creating subtipo' });
+    }
+};
+
+export const updateSubtipo = async (req: Request, res: Response) => {
+    const id = Number(req.params.id);
+    try {
+        const { nombre, descripcion, codigo } = req.body;
+        const updated = await prisma.subtipoRiesgo.update({
+            where: { id },
+            data: {
+                ...(nombre && { nombre }),
+                ...(descripcion !== undefined && { descripcion }),
+                ...(codigo !== undefined && { codigo })
+            }
+        });
+        res.json(updated);
+    } catch (error) {
+        res.status(500).json({ error: 'Error updating subtipo' });
+    }
+};
+
+export const deleteSubtipo = async (req: Request, res: Response) => {
+    const id = Number(req.params.id);
+    try {
+        await prisma.subtipoRiesgo.delete({ where: { id } });
+        res.status(204).send();
+    } catch (error) {
+        res.status(500).json({ error: 'Error deleting subtipo' });
+    }
+};
+
 export const getConfiguraciones = async (req: Request, res: Response) => {
     console.log('GET /catalogos/configuraciones');
     try {
@@ -61,6 +145,29 @@ export const getConfiguraciones = async (req: Request, res: Response) => {
     } catch (error) {
         console.error('Error in getConfiguraciones:', error);
         res.status(500).json({ error: 'Error fetching configuraciones' });
+    }
+};
+
+export const createConfiguracion = async (req: Request, res: Response) => {
+    const { clave, valor, tipo, descripcion } = req.body;
+    if (!clave || valor === undefined || !tipo) {
+        return res.status(400).json({ error: 'clave, valor y tipo son requeridos' });
+    }
+
+    try {
+        const valorFinal = typeof valor === 'string' ? valor : JSON.stringify(valor);
+        const created = await prisma.configuracion.create({
+            data: {
+                clave,
+                valor: valorFinal,
+                tipo,
+                descripcion
+            }
+        });
+        res.status(201).json(created);
+    } catch (error) {
+        console.error('Error in createConfiguracion:', error);
+        res.status(500).json({ error: 'Error creating configuracion' });
     }
 };
 
@@ -103,6 +210,42 @@ export const getObjetivos = async (req: Request, res: Response) => {
     }
 };
 
+export const createObjetivo = async (req: Request, res: Response) => {
+    try {
+        const { descripcion, codigo } = req.body;
+        const newObj = await prisma.objetivo.create({
+            data: { descripcion, codigo }
+        });
+        res.status(201).json(newObj);
+    } catch (error) {
+        res.status(500).json({ error: 'Error creating objetivo' });
+    }
+};
+
+export const updateObjetivo = async (req: Request, res: Response) => {
+    const id = Number(req.params.id);
+    try {
+        const { descripcion, codigo } = req.body;
+        const updated = await prisma.objetivo.update({
+            where: { id },
+            data: { descripcion, codigo }
+        });
+        res.json(updated);
+    } catch (error) {
+        res.status(500).json({ error: 'Error updating objetivo' });
+    }
+};
+
+export const deleteObjetivo = async (req: Request, res: Response) => {
+    const id = Number(req.params.id);
+    try {
+        await prisma.objetivo.delete({ where: { id } });
+        res.status(204).send();
+    } catch (error) {
+        res.status(500).json({ error: 'Error deleting objetivo' });
+    }
+};
+
 export const getFormulas = async (req: Request, res: Response) => {
     try {
         const formulas = await prisma.formula.findMany();
@@ -120,7 +263,14 @@ export const getFrecuencias = async (req: Request, res: Response) => {
         { id: '4', label: 'Probable', descripcion: 'mayor a diaria y hasta mensual' },
         { id: '5', label: 'Esperado', descripcion: 'diaria o varias veces al día' },
     ];
-    res.json(frecuencias);
+        try {
+            const frecuencias = await prisma.frecuenciaCatalog.findMany({
+                orderBy: { id: 'asc' }
+            });
+            res.json(frecuencias);
+        } catch (error) {
+            res.status(500).json({ error: 'Error fetching frecuencias' });
+        }
 };
 
 export const getFuentes = async (req: Request, res: Response) => {
@@ -131,7 +281,14 @@ export const getFuentes = async (req: Request, res: Response) => {
         { id: '4', codigo: '4', nombre: 'Infraestructura' },
         { id: '5', codigo: '5', nombre: 'Externos' },
     ];
-    res.json(fuentes);
+        try {
+            const fuentes = await prisma.fuenteCatalog.findMany({
+                orderBy: { id: 'asc' }
+            });
+            res.json(fuentes);
+        } catch (error) {
+            res.status(500).json({ error: 'Error fetching fuentes' });
+        }
 };
 
 export const getOrigenes = async (req: Request, res: Response) => {
@@ -142,7 +299,14 @@ export const getOrigenes = async (req: Request, res: Response) => {
         { id: '4', codigo: '4', nombre: 'SGSI' },
         { id: '5', codigo: '5', nombre: 'SSO' },
     ];
-    res.json(origenes);
+        try {
+            const origenes = await prisma.origenCatalog.findMany({
+                orderBy: { id: 'asc' }
+            });
+            res.json(origenes);
+        } catch (error) {
+            res.status(500).json({ error: 'Error fetching origenes' });
+        }
 };
 
 export const getTiposProceso = async (req: Request, res: Response) => {
@@ -162,7 +326,14 @@ export const getConsecuencias = async (req: Request, res: Response) => {
         { id: '1', codigo: '1', nombre: 'Negativa' },
         { id: '2', codigo: '2', nombre: 'Positiva' },
     ];
-    res.json(consecuencias);
+        try {
+            const consecuencias = await prisma.consecuenciaCatalog.findMany({
+                orderBy: { id: 'asc' }
+            });
+            res.json(consecuencias);
+        } catch (error) {
+            res.status(500).json({ error: 'Error fetching consecuencias' });
+        }
 };
 
 export const getNivelesRiesgo = async (req: Request, res: Response) => {
@@ -188,7 +359,142 @@ export const getImpactos = async (req: Request, res: Response) => {
         { id: '7', tipo: 'Personas', valor: 0, descripcion: '' },
         { id: '8', tipo: 'Integridad SGSI', valor: 0, descripcion: '' },
     ];
-    res.json(impactos);
+        try {
+            const impactos = await prisma.impactoTipo.findMany({
+                include: { niveles: { orderBy: { nivel: 'asc' } } },
+                orderBy: { id: 'asc' }
+            });
+            res.json(impactos);
+        } catch (error) {
+            console.error('Error in getImpactos:', error);
+            res.status(500).json({ error: 'Error fetching impactos' });
+        }
+};
+
+export const createImpactoTipo = async (req: Request, res: Response) => {
+    try {
+        const { clave, nombre } = req.body;
+        if (!clave || !nombre) {
+            return res.status(400).json({ error: 'clave y nombre son requeridos' });
+        }
+        const impacto = await prisma.impactoTipo.create({
+            data: { clave, nombre }
+        });
+        res.status(201).json(impacto);
+    } catch (error) {
+        res.status(500).json({ error: 'Error creating impacto tipo' });
+    }
+};
+
+export const updateImpactoNiveles = async (req: Request, res: Response) => {
+    const impactoTipoId = Number(req.params.id);
+    const { niveles } = req.body as { niveles: { nivel: number; descripcion: string }[] };
+    if (!impactoTipoId || !Array.isArray(niveles)) {
+        return res.status(400).json({ error: 'niveles invalidos' });
+    }
+    try {
+        await prisma.$transaction([
+            prisma.impactoNivel.deleteMany({ where: { impactoTipoId } }),
+            prisma.impactoNivel.createMany({
+                data: niveles.map((n) => ({
+                    impactoTipoId,
+                    nivel: n.nivel,
+                    descripcion: n.descripcion
+                }))
+            })
+        ]);
+        const updated = await prisma.impactoTipo.findUnique({
+            where: { id: impactoTipoId },
+            include: { niveles: { orderBy: { nivel: 'asc' } } }
+        });
+        res.json(updated);
+    } catch (error) {
+        res.status(500).json({ error: 'Error updating impacto niveles' });
+    }
+};
+
+export const deleteImpactoTipo = async (req: Request, res: Response) => {
+    const impactoTipoId = Number(req.params.id);
+    try {
+        await prisma.impactoTipo.delete({ where: { id: impactoTipoId } });
+        res.status(204).send();
+    } catch (error) {
+        res.status(500).json({ error: 'Error deleting impacto tipo' });
+    }
+};
+
+export const updateFrecuencias = async (req: Request, res: Response) => {
+    const data = req.body as { label: string; descripcion: string }[];
+    if (!Array.isArray(data)) {
+        return res.status(400).json({ error: 'Formato invalido' });
+    }
+    try {
+        await prisma.$transaction([
+            prisma.frecuenciaCatalog.deleteMany({}),
+            prisma.frecuenciaCatalog.createMany({
+                data: data.map((f) => ({ label: f.label, descripcion: f.descripcion }))
+            })
+        ]);
+        const items = await prisma.frecuenciaCatalog.findMany({ orderBy: { id: 'asc' } });
+        res.json(items);
+    } catch (error) {
+        res.status(500).json({ error: 'Error updating frecuencias' });
+    }
+};
+
+export const updateFuentes = async (req: Request, res: Response) => {
+    const data = req.body as { nombre: string }[];
+    if (!Array.isArray(data)) {
+        return res.status(400).json({ error: 'Formato invalido' });
+    }
+    try {
+        await prisma.$transaction([
+            prisma.fuenteCatalog.deleteMany({}),
+            prisma.fuenteCatalog.createMany({ data: data.map((f) => ({ nombre: f.nombre })) })
+        ]);
+        const items = await prisma.fuenteCatalog.findMany({ orderBy: { id: 'asc' } });
+        res.json(items);
+    } catch (error) {
+        res.status(500).json({ error: 'Error updating fuentes' });
+    }
+};
+
+export const updateOrigenes = async (req: Request, res: Response) => {
+    const data = req.body as { codigo?: string; nombre: string }[];
+    if (!Array.isArray(data)) {
+        return res.status(400).json({ error: 'Formato invalido' });
+    }
+    try {
+        await prisma.$transaction([
+            prisma.origenCatalog.deleteMany({}),
+            prisma.origenCatalog.createMany({
+                data: data.map((o) => ({ codigo: o.codigo || null, nombre: o.nombre }))
+            })
+        ]);
+        const items = await prisma.origenCatalog.findMany({ orderBy: { id: 'asc' } });
+        res.json(items);
+    } catch (error) {
+        res.status(500).json({ error: 'Error updating origenes' });
+    }
+};
+
+export const updateConsecuencias = async (req: Request, res: Response) => {
+    const data = req.body as { codigo?: string; nombre: string }[];
+    if (!Array.isArray(data)) {
+        return res.status(400).json({ error: 'Formato invalido' });
+    }
+    try {
+        await prisma.$transaction([
+            prisma.consecuenciaCatalog.deleteMany({}),
+            prisma.consecuenciaCatalog.createMany({
+                data: data.map((c) => ({ codigo: c.codigo || null, nombre: c.nombre }))
+            })
+        ]);
+        const items = await prisma.consecuenciaCatalog.findMany({ orderBy: { id: 'asc' } });
+        res.json(items);
+    } catch (error) {
+        res.status(500).json({ error: 'Error updating consecuencias' });
+    }
 };
 export const getEjesMapa = async (req: Request, res: Response) => {
     console.log('GET /catalogos/ejes-mapa');
@@ -264,4 +570,17 @@ export const updateMapaConfig = async (req: Request, res: Response) => {
         console.error('Error updating mapa config:', error);
         res.status(500).json({ error: 'Error updating mapa config' });
     }
+};
+
+export const getVicepresidencias = async (req: Request, res: Response) => {
+    // Return hardcoded or dynamic lists for now since there is no model
+    const vps = [
+        { id: 1, nombre: 'Vicepresidencia Ejecutiva', sigla: 'VPE' },
+        { id: 2, nombre: 'Vicepresidencia de Operaciones', sigla: 'VPO' },
+        { id: 3, nombre: 'Vicepresidencia Comercial', sigla: 'VPC' },
+        { id: 4, nombre: 'Vicepresidencia Financiera', sigla: 'VPF' },
+        { id: 5, nombre: 'Vicepresidencia de Tecnología', sigla: 'VPT' },
+        { id: 6, nombre: 'Vicepresidencia de Talento Humano', sigla: 'VPTH' },
+    ];
+    res.json(vps);
 };

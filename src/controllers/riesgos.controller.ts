@@ -2,7 +2,7 @@ import { Request, Response } from 'express';
 import prisma from '../prisma';
 
 export const getRiesgos = async (req: Request, res: Response) => {
-    const { procesoId, clasificacion, busqueda, page, pageSize, zona } = req.query;
+    const { procesoId, clasificacion, busqueda, page, pageSize, zona, includeCausas } = req.query;
     console.log('[BACKEND] getRiesgos - query:', JSON.stringify(req.query, null, 2));
     const where: any = {};
     if (procesoId) where.procesoId = Number(procesoId);
@@ -19,6 +19,7 @@ export const getRiesgos = async (req: Request, res: Response) => {
     const skip = (Number(page) - 1) * take || 0;
 
     try {
+        const includeCausasFlag = String(includeCausas) === 'true';
         const [riesgos, total] = await Promise.all([
             prisma.riesgo.findMany({
                 where,
@@ -27,6 +28,7 @@ export const getRiesgos = async (req: Request, res: Response) => {
                 include: {
                     evaluacion: true,
                     proceso: true,
+                    causas: includeCausasFlag ? { include: { controles: true } } : false,
                 },
                 orderBy: { createdAt: 'desc' },
             }),
@@ -269,5 +271,23 @@ export const getCausas = async (req: Request, res: Response) => {
     } catch (error) {
         console.error('[BACKEND] Error in getCausas:', error);
         res.status(500).json({ error: 'Error fetching causas' });
+    }
+};
+
+export const updateCausa = async (req: Request, res: Response) => {
+    const id = Number(req.params.id);
+    try {
+        const { tipoGestion, gestion } = req.body;
+        const updated = await prisma.causaRiesgo.update({
+            where: { id },
+            data: {
+                ...(tipoGestion !== undefined && { tipoGestion }),
+                ...(gestion !== undefined && { gestion })
+            }
+        });
+        res.json(updated);
+    } catch (error) {
+        console.error('[BACKEND] Error in updateCausa:', error);
+        res.status(500).json({ error: 'Error updating causa' });
     }
 };

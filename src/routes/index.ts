@@ -10,6 +10,13 @@ import utilidadesRoutes from './utilidades.routes';
 import areasRoutes from './areas.routes';
 import cargosRoutes from './cargos.routes';
 import gerenciasRoutes from './gerencias.routes';
+import controlesRoutes from './controles.routes';
+import incidenciasRoutes from './incidencias.routes';
+import planesAccionRoutes from './planes-accion.routes';
+import benchmarkingRoutes from './benchmarking.routes';
+import dofaRoutes from './dofa.routes';
+import normatividadRoutes from './normatividad.routes';
+import contextoRoutes from './contexto.routes';
 
 const router = Router();
 
@@ -32,5 +39,14 @@ router.use('/priorizaciones', priorizacionesRoutes);
 router.use('/areas', areasRoutes);
 router.use('/cargos', cargosRoutes);
 router.use('/gerencias', gerenciasRoutes);
+
+// New Routes - Risk Management
+router.use('/controles', controlesRoutes);
+router.use('/incidencias', incidenciasRoutes);
+router.use('/planes-accion', planesAccionRoutes);
+router.use('/benchmarking', benchmarkingRoutes);
+router.use('/dofa', dofaRoutes);
+router.use('/normatividad', normatividadRoutes);
+router.use('/contexto', contextoRoutes);
 
 export default router;
