@@ -29,17 +29,25 @@ export const getProcesos = async (req: Request, res: Response) => {
 };
 
 export const getProcesoById = async (req: Request, res: Response) => {
-    const id = Number(req.params.id);
-    console.log(`[BACKEND] getProcesoById - id: ${id}`);
+    const { id } = req.params;
     
-    // Validar que el ID sea un número válido
-    if (isNaN(id) || id <= 0) {
-        return res.status(400).json({ error: 'Invalid proceso ID' });
+    // Validate ID exists and is a valid number
+    if (!id || id === 'undefined' || id === '') {
+        console.warn('[BACKEND] getProcesoById - Invalid or missing ID:', id);
+        return res.status(400).json({ error: 'Proceso ID is required and must be a valid number' });
+    }
+    
+    const procesoId = Number(id);
+    console.log(`[BACKEND] getProcesoById - id: ${id}, parsed as: ${procesoId}`);
+    
+    if (isNaN(procesoId) || procesoId <= 0) {
+        console.warn('[BACKEND] getProcesoById - Invalid (non-numeric or <= 0) ID:', id);
+        return res.status(400).json({ error: 'Invalid proceso ID - must be a positive number' });
     }
     
     try {
         const proceso = await prisma.proceso.findUnique({
-            where: { id },
+            where: { id: procesoId },
             include: {
                 responsable: true,
                 area: {
@@ -52,7 +60,10 @@ export const getProcesoById = async (req: Request, res: Response) => {
                 participantes: true,
             }
         });
-        if (!proceso) return res.status(404).json({ error: 'Proceso not found' });
+        if (!proceso) {
+            console.warn('[BACKEND] getProcesoById - Proceso not found with ID:', procesoId);
+            return res.status(404).json({ error: 'Proceso not found' });
+        }
         res.json(proceso);
     } catch (error) {
         console.error('[BACKEND] Error in getProcesoById:', error);
