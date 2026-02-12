@@ -301,23 +301,47 @@ export const getPuntosMapa = async (req: Request, res: Response) => {
         });
 
         const puntos = riesgos
-            .filter(r => r.evaluacion)
-            .map(r => ({
-                riesgoId: r.id,
-                descripcion: r.descripcion,
-                probabilidad: r.evaluacion!.probabilidad,
-                impacto: r.evaluacion!.impactoGlobal,
+            .filter(r => {
+                // Solo incluir riesgos con evaluación válida
+                if (!r.evaluacion) return false;
+                const prob = Number(r.evaluacion.probabilidad);
+                const imp = Number(r.evaluacion.impactoGlobal);
+                // Validar que sean números válidos entre 1 y 5
+                return !isNaN(prob) && !isNaN(imp) && prob >= 1 && prob <= 5 && imp >= 1 && imp <= 5;
+            })
+            .map(r => {
+                // Asegurar que probabilidad e impacto sean números enteros en rango 1-5
+                const probabilidad = Math.max(1, Math.min(5, Math.round(Number(r.evaluacion!.probabilidad))));
+                const impacto = Math.max(1, Math.min(5, Math.round(Number(r.evaluacion!.impactoGlobal))));
+                
+                const probabilidadResidual = r.evaluacion!.probabilidadResidual 
+                    ? Math.max(1, Math.min(5, Math.round(Number(r.evaluacion!.probabilidadResidual))))
+                    : probabilidad;
+                const impactoResidual = r.evaluacion!.impactoResidual
+                    ? Math.max(1, Math.min(5, Math.round(Number(r.evaluacion!.impactoResidual))))
+                    : impacto;
+                
+                return {
+                    riesgoId: r.id,
+                    descripcion: r.descripcion,
+                    probabilidad,
+                    impacto,
 
-                // Residual
-                probabilidadResidual: r.evaluacion!.probabilidadResidual ?? r.evaluacion!.probabilidad,
-                impactoResidual: r.evaluacion!.impactoResidual ?? r.evaluacion!.impactoGlobal,
+                    // Residual
+                    probabilidadResidual,
+                    impactoResidual,
 
-                nivelRiesgo: r.evaluacion!.nivelRiesgo,
-                clasificacion: r.clasificacion,
-                numero: r.numero,
-                siglaGerencia: r.siglaGerencia || '',
-                numeroIdentificacion: r.numeroIdentificacion || `${r.id}R`
-            }));
+                    nivelRiesgo: r.evaluacion!.nivelRiesgo,
+                    clasificacion: r.clasificacion,
+                    numero: r.numero,
+                    siglaGerencia: r.siglaGerencia || '',
+                    numeroIdentificacion: r.numeroIdentificacion || `${r.id}R`,
+                    procesoId: r.procesoId,
+                    procesoNombre: r.proceso?.nombre || 'Proceso desconocido'
+                };
+            });
+        
+        console.log(`[BACKEND] getPuntosMapa - ${puntos.length} puntos válidos generados de ${riesgos.length} riesgos totales`);
 
         res.json(puntos);
     } catch (error) {
@@ -369,18 +393,57 @@ export const createCausa = async (req: Request, res: Response) => {
 
 export const updateCausa = async (req: Request, res: Response) => {
     const id = Number(req.params.id);
+    console.log('[BACKEND] updateCausa - id:', id, 'body:', req.body);
     try {
-        const { tipoGestion, gestion } = req.body;
+        const { tipoGestion, gestion, descripcion, fuenteCausa, frecuencia } = req.body;
+        const updateData: any = {};
+        
+        // Campos de gestión (existentes)
+        if (tipoGestion !== undefined) updateData.tipoGestion = tipoGestion;
+        if (gestion !== undefined) updateData.gestion = gestion;
+        
+        // Campos básicos de causa (nuevos)
+        if (descripcion !== undefined) updateData.descripcion = descripcion;
+        if (fuenteCausa !== undefined) updateData.fuenteCausa = fuenteCausa;
+        if (frecuencia !== undefined) updateData.frecuencia = frecuencia ? String(frecuencia) : null;
+        
         const updated = await prisma.causaRiesgo.update({
             where: { id },
-            data: {
-                ...(tipoGestion !== undefined && { tipoGestion }),
-                ...(gestion !== undefined && { gestion })
-            }
+            data: updateData
         });
+        console.log('[BACKEND] Causa actualizada:', updated.id);
         res.json(updated);
     } catch (error) {
         console.error('[BACKEND] Error in updateCausa:', error);
         res.status(500).json({ error: 'Error updating causa' });
+    }
+};
+
+export const deleteCausa = async (req: Request, res: Response) => {
+    const id = Number(req.params.id);
+    console.log('[BACKEND] deleteCausa - id:', id, 'params:', req.params);
+    try {
+        // Verificar que la causa existe antes de intentar eliminarla
+        const causa = await prisma.causaRiesgo.findUnique({
+            where: { id }
+        });
+        
+        if (!causa) {
+            console.log('[BACKEND] Causa no encontrada:', id);
+            return res.status(404).json({ error: `Causa con id ${id} no encontrada` });
+        }
+        
+        await prisma.causaRiesgo.delete({
+            where: { id }
+        });
+        console.log('[BACKEND] Causa eliminada exitosamente:', id);
+        res.json({ message: 'Causa eliminada correctamente', id });
+    } catch (error: any) {
+        console.error('[BACKEND] Error in deleteCausa:', error);
+        // Si es un error de Prisma (causa no encontrada)
+        if (error.code === 'P2025') {
+            return res.status(404).json({ error: `Causa con id ${id} no encontrada` });
+        }
+        res.status(500).json({ error: 'Error deleting causa', details: error.message });
     }
 };

@@ -260,6 +260,9 @@ model EvaluacionRiesgo {
   impactoReputacion   Int
   impactoEconomico    Int
   impactoTecnologico  Int
+  confidencialidadSGSI Int?
+  disponibilidadSGSI  Int?
+  integridadSGSI      Int?
   probabilidad        Int
   
   impactoGlobal       Int

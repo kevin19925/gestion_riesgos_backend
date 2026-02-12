@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { getRiesgos, getRiesgoById, createRiesgo, updateRiesgo, deleteRiesgo, getEstadisticas, getRiesgosRecientes, getPuntosMapa, getCausas, createCausa, updateCausa } from '../controllers/riesgos.controller';
+import { getRiesgos, getRiesgoById, createRiesgo, updateRiesgo, deleteRiesgo, getEstadisticas, getRiesgosRecientes, getPuntosMapa, getCausas, createCausa, updateCausa, deleteCausa } from '../controllers/riesgos.controller';
 import { getEvaluacionesByRiesgo, createEvaluacion } from '../controllers/evaluaciones.controller';
 
 const router = Router();
@@ -11,6 +11,7 @@ router.get('/mapa', getPuntosMapa);
 router.get('/causas', getCausas);
 router.post('/causas', createCausa);
 router.put('/causas/:id', updateCausa);
+router.delete('/causas/:id', deleteCausa);
 
 router.get('/', getRiesgos);
 router.get('/:id', getRiesgoById);
