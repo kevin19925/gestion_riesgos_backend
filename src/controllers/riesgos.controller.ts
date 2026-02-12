@@ -5,7 +5,12 @@ export const getRiesgos = async (req: Request, res: Response) => {
     const { procesoId, clasificacion, busqueda, page, pageSize, zona, includeCausas } = req.query;
     console.log('[BACKEND] getRiesgos - query:', JSON.stringify(req.query, null, 2));
     const where: any = {};
-    if (procesoId) where.procesoId = Number(procesoId);
+    if (procesoId) {
+        const parsedProcesoId = Number(procesoId);
+        if (!isNaN(parsedProcesoId) && parsedProcesoId > 0) {
+            where.procesoId = parsedProcesoId;
+        }
+    }
     if (clasificacion && clasificacion !== 'all') where.clasificacion = String(clasificacion);
     if (zona) where.zona = String(zona);
     if (busqueda) {
@@ -51,6 +56,12 @@ export const getRiesgos = async (req: Request, res: Response) => {
 export const getRiesgoById = async (req: Request, res: Response) => {
     const id = Number(req.params.id);
     console.log(`[BACKEND] getRiesgoById - id: ${id}`);
+    
+    // Validar que el ID sea un número válido
+    if (isNaN(id) || id <= 0) {
+        return res.status(400).json({ error: 'Invalid riesgo ID' });
+    }
+    
     try {
         const riesgo = await prisma.riesgo.findUnique({
             where: { id },

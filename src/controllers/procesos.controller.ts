@@ -31,6 +31,12 @@ export const getProcesos = async (req: Request, res: Response) => {
 export const getProcesoById = async (req: Request, res: Response) => {
     const id = Number(req.params.id);
     console.log(`[BACKEND] getProcesoById - id: ${id}`);
+    
+    // Validar que el ID sea un número válido
+    if (isNaN(id) || id <= 0) {
+        return res.status(400).json({ error: 'Invalid proceso ID' });
+    }
+    
     try {
         const proceso = await prisma.proceso.findUnique({
             where: { id },
