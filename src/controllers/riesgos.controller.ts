@@ -93,7 +93,7 @@ export const getRiesgoById = async (req: Request, res: Response) => {
 
 export const createRiesgo = async (req: Request, res: Response) => {
     console.log('[BACKEND] createRiesgo - body:', JSON.stringify(req.body, null, 2));
-    const { causas, priorizacion, ...riesgoData } = req.body;
+    const { evaluacion, causas, priorizacion, ...riesgoData } = req.body;
 
     try {
         // Validate required fields
@@ -112,6 +112,13 @@ export const createRiesgo = async (req: Request, res: Response) => {
             procesoId: Number(riesgoData.procesoId),
             numero: Number(riesgoData.numero)
         };
+
+        // Create evaluation data if provided
+        if (evaluacion) {
+            data.evaluacion = {
+                create: evaluacion
+            };
+        }
 
         if (causas) {
             data.causas = {
