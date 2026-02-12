@@ -96,9 +96,21 @@ export const createRiesgo = async (req: Request, res: Response) => {
     const { causas, priorizacion, ...riesgoData } = req.body;
 
     try {
+        // Validate required fields
+        if (!riesgoData.procesoId) {
+            return res.status(400).json({ error: 'procesoId is required' });
+        }
+        if (!riesgoData.numero && riesgoData.numero !== 0) {
+            return res.status(400).json({ error: 'numero is required' });
+        }
+        if (!riesgoData.descripcion) {
+            return res.status(400).json({ error: 'descripcion is required' });
+        }
+
         const data: any = {
             ...riesgoData,
-            procesoId: Number(riesgoData.procesoId)
+            procesoId: Number(riesgoData.procesoId),
+            numero: Number(riesgoData.numero)
         };
 
         if (causas) {
@@ -123,9 +135,27 @@ export const createRiesgo = async (req: Request, res: Response) => {
             }
         });
         res.json(nuevoRiesgo);
-    } catch (error) {
+    } catch (error: any) {
         console.error('[BACKEND] Error in createRiesgo:', error);
-        res.status(500).json({ error: 'Error creating riesgo' });
+        
+        // Handle unique constraint violations
+        if (error.code === 'P2002') {
+            const field = error.meta?.target?.[0] || 'unknown';
+            return res.status(400).json({ 
+                error: `Duplicate ${field}: A risk with this ${field} already exists for this process`,
+                details: error.message
+            });
+        }
+        
+        // Handle foreign key constraint violations
+        if (error.code === 'P2003') {
+            return res.status(400).json({ 
+                error: 'Invalid reference: Process or related entity does not exist',
+                details: error.message
+            });
+        }
+        
+        res.status(500).json({ error: 'Error creating riesgo', details: error.message });
     }
 };
 
