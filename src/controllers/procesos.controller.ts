@@ -163,7 +163,7 @@ export const deleteProceso = async (req: Request, res: Response) => {
     }
 };
 export const bulkUpdateProcesos = async (req: Request, res: Response) => {
-    console.log('[BACKEND] bulkUpdateProcesos');
+    console.log('[BACKEND] bulkUpdateProcesos - body:', JSON.stringify(req.body, null, 2));
     const procesos = req.body;
     try {
         if (!Array.isArray(procesos)) {
@@ -171,20 +171,23 @@ export const bulkUpdateProcesos = async (req: Request, res: Response) => {
         }
 
         const updated = await Promise.all(
-            procesos.map(p =>
-                prisma.proceso.update({
+            procesos.map(p => {
+                const updateData: any = {};
+                
+                // Only include fields if they're provided
+                if (p.responsableId !== undefined) updateData.responsableId = p.responsableId ? Number(p.responsableId) : null;
+                if (p.areaId !== undefined) updateData.areaId = p.areaId ? Number(p.areaId) : null;
+                if (p.nombre !== undefined) updateData.nombre = p.nombre;
+                if (p.descripcion !== undefined) updateData.descripcion = p.descripcion;
+                if (p.objetivo !== undefined) updateData.objetivo = p.objetivo;
+                if (p.tipo !== undefined) updateData.tipo = p.tipo;
+                if (p.estado !== undefined) updateData.estado = p.estado;
+                
+                return prisma.proceso.update({
                     where: { id: Number(p.id) },
-                    data: {
-                        responsableId: p.responsableId ? Number(p.responsableId) : null,
-                        areaId: p.areaId ? Number(p.areaId) : null,
-                        nombre: p.nombre,
-                        descripcion: p.descripcion,
-                        objetivo: p.objetivo,
-                        tipo: p.tipo,
-                        estado: p.estado
-                    }
-                })
-            )
+                    data: updateData
+                });
+            })
         );
         res.json(updated);
     } catch (error) {
