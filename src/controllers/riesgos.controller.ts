@@ -25,17 +25,24 @@ export const getRiesgos = async (req: Request, res: Response) => {
 
     try {
         const includeCausasFlag = String(includeCausas) === 'true';
+        
+        // Construir include de forma segura - solo relaciones básicas que sabemos que existen
+        const include: any = {
+            evaluacion: true,
+            proceso: true  // Incluir proceso completo sin select específico para evitar errores
+        };
+        
+        // Incluir causas si se solicita, pero de forma segura
+        if (includeCausasFlag) {
+            include.causas = true;  // Solo incluir causas, sin controles anidados por ahora
+        }
+        
         const [riesgos, total] = await Promise.all([
             prisma.riesgo.findMany({
                 where,
                 take,
                 skip,
-                include: {
-                    evaluacion: true,
-                    proceso: true,
-                    objetivo: true, // Incluir relación objetivo
-                    causas: includeCausasFlag ? { include: { controles: true } } : false,
-                },
+                include,
                 orderBy: { createdAt: 'desc' },
             }),
             prisma.riesgo.count({ where })
@@ -68,19 +75,13 @@ export const getRiesgoById = async (req: Request, res: Response) => {
             where: { id },
             include: {
                 evaluacion: true,
-                causas: {
-                    include: {
-                        controles: true
-                    }
-                },
+                causas: true,  // Incluir causas sin controles anidados por ahora
                 priorizacion: {
                     include: {
                         planesAccion: true
                     }
                 },
-                proceso: {
-                    include: { responsable: true } // to verify access if needed
-                }
+                proceso: true  // Incluir proceso completo sin select específico
             }
         });
 
@@ -337,7 +338,10 @@ export const getPuntosMapa = async (req: Request, res: Response) => {
                     siglaGerencia: r.siglaGerencia || '',
                     numeroIdentificacion: r.numeroIdentificacion || `${r.id}R`,
                     procesoId: r.procesoId,
-                    procesoNombre: r.proceso?.nombre || 'Proceso desconocido'
+                    procesoNombre: r.proceso?.nombre || 'Proceso desconocido',
+                    // Campos adicionales del riesgo
+                    zona: r.zona || null,
+                    tipologiaNivelI: r.tipologiaNivelI || null
                 };
             });
         
@@ -352,8 +356,9 @@ export const getPuntosMapa = async (req: Request, res: Response) => {
 export const getCausas = async (req: Request, res: Response) => {
     console.log('[BACKEND] getCausas');
     try {
+        // Incluir solo causas sin controles anidados para evitar errores de columnas faltantes
         const causas = await prisma.causaRiesgo.findMany({
-            include: { controles: true }
+            // Sin include de controles por ahora para evitar errores
         });
         res.json(causas);
     } catch (error) {
