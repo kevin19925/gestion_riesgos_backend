@@ -647,6 +647,38 @@ async function main() {
     console.log(`  - ${causas.length} Causas`)
     console.log(`  - ${allTiposRiesgo.length} Tipos de Riesgo`)
     console.log(`  - ${objetivosData.length} Objetivos`)
+
+    // 11. LIM PIEZA - ASEGURAR QUE GERENCIA SEA STRING, NO NÚMERO
+    console.log('\n🧹 Limpiando datos de gerencia (convertir IDs a nombres si es necesario)...')
+    const procesosActuales = await prisma.proceso.findMany()
+    const todasGerencias = await prisma.gerencia.findMany()
+    const gerenciaMap = new Map(todasGerencias.map(g => [g.id, g.nombre]))
+
+    // Revisar si hay procesos con gerencia como número y convertir a nombre
+    let gerenciasActualizadas = 0
+    for (const p of procesosActuales) {
+        if (p.gerencia) {
+            // Verificar si la gerencia es un número (ID)
+            const gerenciaNum = Number(p.gerencia)
+            if (!isNaN(gerenciaNum) && gerenciaNum > 0) {
+                // Si es un número, buscar el nombre correspondiente
+                const gerenciaNombre = gerenciaMap.get(gerenciaNum)
+                if (gerenciaNombre && gerenciaNombre !== p.gerencia) {
+                    await prisma.proceso.update({
+                        where: { id: p.id },
+                        data: { gerencia: gerenciaNombre }
+                    })
+                    console.log(`  ✓ Proceso ID ${p.id}: "${p.gerencia}" → "${gerenciaNombre}"`)
+                    gerenciasActualizadas++
+                }
+            }
+        }
+    }
+    if (gerenciasActualizadas > 0) {
+        console.log(`✅ ${gerenciasActualizadas} procesos con gerencia actualizada a nombresAdecuados\n`)
+    } else {
+        console.log('✅ Todos los procesos tienen gerencia correctamente almacenada\n')
+    }
 }
 
 main()
