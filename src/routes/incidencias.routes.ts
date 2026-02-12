@@ -14,10 +14,11 @@ const router = Router();
 
 // Listado general (filtros por query: procesoId, riesgoId)
 router.get('/', getIncidencias);
+router.post('/', createIncidencia); // Crear incidencia con riesgoId en body
 
 // Incidencias por riesgo
 router.get('/riesgo/:riesgoId', getIncidenciasByRiesgo);
-router.post('/riesgo/:riesgoId', createIncidencia);
+router.post('/riesgo/:riesgoId', createIncidencia); // Crear con riesgoId en param
 
 // Queries especiales
 router.get('/periodo', getIncidenciasByPeriodo);

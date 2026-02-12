@@ -33,6 +33,7 @@ export const getRiesgos = async (req: Request, res: Response) => {
                 include: {
                     evaluacion: true,
                     proceso: true,
+                    objetivo: true, // Incluir relación objetivo
                     causas: includeCausasFlag ? { include: { controles: true } } : false,
                 },
                 orderBy: { createdAt: 'desc' },
@@ -169,9 +170,19 @@ export const createRiesgo = async (req: Request, res: Response) => {
 export const updateRiesgo = async (req: Request, res: Response) => {
     const id = Number(req.params.id);
     console.log(`[BACKEND] updateRiesgo - id: ${id}, body:`, JSON.stringify(req.body, null, 2));
-    const { evaluacion, causas, priorizacion, ...data } = req.body;
+    let { evaluacion, causas, priorizacion, ...data } = req.body;
     try {
         if (data.procesoId) data.procesoId = Number(data.procesoId);
+
+        // Mover campos de evaluación residual si vienen en el body raíz
+        const evaluacionFields = ['riesgoResidual', 'probabilidadResidual', 'impactoResidual', 'nivelRiesgoResidual'];
+        const evaluacionUpdate: any = { ...evaluacion };
+        evaluacionFields.forEach(field => {
+            if (data[field] !== undefined) {
+                evaluacionUpdate[field] = data[field];
+                delete data[field];
+            }
+        });
 
         const updated = await prisma.riesgo.update({
             where: { id },
@@ -181,12 +192,17 @@ export const updateRiesgo = async (req: Request, res: Response) => {
             }
         });
 
-        if (evaluacion) {
-            await prisma.evaluacionRiesgo.upsert({
-                where: { riesgoId: id },
-                create: { ...evaluacion, riesgoId: id },
-                update: { ...evaluacion }
+        // Solo actualizar evaluación si ya existe (no crear nueva)
+        if (Object.keys(evaluacionUpdate).length > 0) {
+            const existingEval = await prisma.evaluacionRiesgo.findUnique({
+                where: { riesgoId: id }
             });
+            if (existingEval) {
+                await prisma.evaluacionRiesgo.update({
+                    where: { riesgoId: id },
+                    data: { ...evaluacionUpdate }
+                });
+            }
         }
 
         res.json(updated);
@@ -319,6 +335,35 @@ export const getCausas = async (req: Request, res: Response) => {
     } catch (error) {
         console.error('[BACKEND] Error in getCausas:', error);
         res.status(500).json({ error: 'Error fetching causas' });
+    }
+};
+
+export const createCausa = async (req: Request, res: Response) => {
+    console.log('[BACKEND] createCausa', req.body);
+    try {
+        const { riesgoId, descripcion, fuenteCausa, frecuencia, seleccionada, tipoGestion, gestion } = req.body;
+        
+        if (!riesgoId || !descripcion) {
+            return res.status(400).json({ error: 'riesgoId y descripcion son requeridos' });
+        }
+
+        const causa = await prisma.causaRiesgo.create({
+            data: {
+                riesgoId: Number(riesgoId),
+                descripcion,
+                fuenteCausa: fuenteCausa || null,
+                frecuencia: frecuencia ? String(frecuencia) : null,
+                seleccionada: seleccionada !== undefined ? seleccionada : true,
+                tipoGestion: tipoGestion || null,
+                gestion: gestion || null
+            }
+        });
+        
+        console.log('[BACKEND] Causa creada:', causa.id);
+        res.status(201).json(causa);
+    } catch (error) {
+        console.error('[BACKEND] Error in createCausa:', error);
+        res.status(500).json({ error: 'Error creating causa' });
     }
 };
 
