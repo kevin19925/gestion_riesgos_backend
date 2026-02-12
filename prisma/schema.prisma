@@ -163,12 +163,16 @@ model Riesgo {
   tipologiaNivelI String?
   tipologiaNivelII String?
   
+  // Campos de texto para tipo y subtipo (compatibilidad)
+  tipoRiesgo      String?
+  subtipoRiesgo   String?
+  
   // Relaciones con catálogos (opcionalmente normalizado)
   tipoRiesgoId    Int?
-  tipoRiesgo      TipoRiesgo? @relation(fields: [tipoRiesgoId], references: [id])
+  tipoRiesgoRelacion      TipoRiesgo? @relation(fields: [tipoRiesgoId], references: [id])
   
   subtipoRiesgoId Int?
-  subtipoRiesgo   SubtipoRiesgo? @relation(fields: [subtipoRiesgoId], references: [id])
+  subtipoRiesgoRelacion   SubtipoRiesgo? @relation(fields: [subtipoRiesgoId], references: [id])
   
   objetivoId      Int?
   objetivo        Objetivo? @relation(fields: [objetivoId], references: [id])
