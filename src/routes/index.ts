@@ -17,6 +17,7 @@ import benchmarkingRoutes from './benchmarking.routes';
 import dofaRoutes from './dofa.routes';
 import normatividadRoutes from './normatividad.routes';
 import contextoRoutes from './contexto.routes';
+import uploadRoutes from './upload.routes';
 
 const router = Router();
 
@@ -48,5 +49,6 @@ router.use('/benchmarking', benchmarkingRoutes);
 router.use('/dofa', dofaRoutes);
 router.use('/normatividad', normatividadRoutes);
 router.use('/contexto', contextoRoutes);
+router.use('/upload', uploadRoutes);
 
 export default router;
