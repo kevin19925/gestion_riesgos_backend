@@ -4,11 +4,16 @@
  * Compatible con Render (sistema de archivos efímero)
  */
 
-import express from 'express';
+import express, { Request, Response } from 'express';
 import multer from 'multer';
 import cloudinary from '../utils/cloudinary';
 
 const router = express.Router();
+
+// Tipo para Request con archivo de multer
+interface RequestWithFile extends Request {
+  file?: Express.Multer.File;
+}
 
 // Configurar multer para almacenar en memoria (no en disco, porque Render es efímero)
 const upload = multer({ 
@@ -41,7 +46,9 @@ const upload = multer({
  * POST /api/upload/archivo
  * Sube un archivo a Cloudinary
  */
-router.post('/archivo', upload.single('archivo'), async (req, res) => {
+// Usar type assertion para evitar conflictos de tipos entre multer y express
+const uploadMiddleware = upload.single('archivo') as any;
+router.post('/archivo', uploadMiddleware, async (req: RequestWithFile, res: Response) => {
   try {
     if (!req.file) {
       return res.status(400).json({ error: 'No se proporcionó ningún archivo' });
