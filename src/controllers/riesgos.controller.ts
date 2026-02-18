@@ -419,7 +419,7 @@ export const getPuntosMapa = async (req: Request, res: Response) => {
                 if (r.causas && r.causas.length > 0) {
                     const causasConControles = r.causas.filter((c: any) => {
                         const tipo = String(c.tipoGestion || '').toUpperCase();
-                        return tipo === 'CONTROL';
+                        return tipo === 'CONTROL' || tipo === 'AMBOS';
                     });
                     
                     console.log(`[BACKEND] Riesgo ${r.id}: ${causasConControles.length} causas con controles de ${r.causas.length} totales`);
@@ -618,6 +618,11 @@ export const createCausa = async (req: Request, res: Response) => {
     }
 };
 
+/**
+ * Actualiza una causa. Soporta:
+ * - tipoGestion: 'CONTROL' | 'PLAN' | 'AMBOS' (o null para eliminar clasificación)
+ * - gestion: objeto JSON con datos de control y/o plan (cuando AMBOS, incluye ambos conjuntos de campos)
+ */
 export const updateCausa = async (req: Request, res: Response) => {
     const id = Number(req.params.id);
     console.log('[BACKEND] updateCausa - id:', id, 'body:', req.body);
@@ -625,7 +630,7 @@ export const updateCausa = async (req: Request, res: Response) => {
         const { tipoGestion, gestion, descripcion, fuenteCausa, frecuencia } = req.body;
         const updateData: any = {};
         
-        // Campos de gestión (existentes)
+        // Campos de gestión: tipoGestion acepta CONTROL, PLAN, AMBOS o null
         if (tipoGestion !== undefined) updateData.tipoGestion = tipoGestion;
         if (gestion !== undefined) updateData.gestion = gestion;
         
