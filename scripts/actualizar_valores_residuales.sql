@@ -34,7 +34,7 @@ BEGIN
             SELECT c.id, c."descripcion", c."frecuencia", c."tipoGestion", c."gestion"
             FROM "CausaRiesgo" c
             WHERE c."riesgoId" = riesgo_record.id
-              AND (c."tipoGestion" = 'CONTROL' OR c."tipoGestion" = 'control')
+              AND (c."tipoGestion" IN ('CONTROL', 'control', 'AMBOS', 'ambos'))
         LOOP
             tiene_controles := true;
             
@@ -194,7 +194,7 @@ SELECT
     e."impactoResidual" AS imp_res,
     e."nivelRiesgo" AS nivel_inh,
     e."nivelRiesgoResidual" AS nivel_res,
-    (SELECT COUNT(*) FROM "CausaRiesgo" WHERE "riesgoId" = r.id AND "tipoGestion" = 'CONTROL') AS num_controles
+    (SELECT COUNT(*) FROM "CausaRiesgo" WHERE "riesgoId" = r.id AND (UPPER("tipoGestion") = 'CONTROL' OR UPPER("tipoGestion") = 'AMBOS')) AS num_controles
 FROM "Riesgo" r
 INNER JOIN "EvaluacionRiesgo" e ON e."riesgoId" = r.id
 ORDER BY r.id;
