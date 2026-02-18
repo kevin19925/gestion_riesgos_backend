@@ -25,6 +25,7 @@ model Usuario {
 
   // Relaciones
   procesosResponsable Proceso[] @relation("ResponsableProceso")
+  procesosResponsablesMultiples ProcesoResponsable[] @relation("ProcesoResponsables")
   areasDirector       Area[]    @relation("DirectorArea")
   
   notificaciones      Notificacion[]
@@ -75,8 +76,12 @@ model Proceso {
   objetivo        String?
   tipo            String?  // Estratégico, Operacional, etc.
   
+  // Responsable principal (mantenido por compatibilidad)
   responsableId   Int?
   responsable     Usuario? @relation("ResponsableProceso", fields: [responsableId], references: [id])
+  
+  // Múltiples responsables (nueva funcionalidad)
+  responsables    ProcesoResponsable[]
   
   areaId          Int?
   area            Area?    @relation(fields: [areaId], references: [id])
@@ -84,6 +89,7 @@ model Proceso {
   // Campos adicionales para reportes
   vicepresidencia String?
   gerencia        String?
+  sigla           String?  // Sigla del proceso para identificar riesgos (ej: "PF" para Planificación Financiera)
   
   estado          String   @default("borrador") // borrador, en_revision, aprobado
   activo          Boolean  @default(true)
@@ -108,6 +114,20 @@ model Proceso {
   participantes   Usuario[] @relation("Participantes")
   documentos      Documento[]
   incidencias     Incidencia[]
+}
+
+// Tabla de relación muchos-a-muchos para múltiples responsables por proceso
+model ProcesoResponsable {
+  id          Int      @id @default(autoincrement())
+  procesoId   Int
+  proceso     Proceso  @relation(fields: [procesoId], references: [id], onDelete: Cascade)
+  usuarioId   Int
+  usuario     Usuario  @relation("ProcesoResponsables", fields: [usuarioId], references: [id], onDelete: Cascade)
+  createdAt   DateTime @default(now())
+  
+  @@unique([procesoId, usuarioId])
+  @@index([procesoId])
+  @@index([usuarioId])
 }
 
 model DofaItem {
