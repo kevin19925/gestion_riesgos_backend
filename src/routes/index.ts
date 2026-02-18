@@ -18,6 +18,7 @@ import dofaRoutes from './dofa.routes';
 import normatividadRoutes from './normatividad.routes';
 import contextoRoutes from './contexto.routes';
 import uploadRoutes from './upload.routes';
+import procesoResponsablesRoutes from './proceso-responsables.routes';
 
 const router = Router();
 
@@ -50,5 +51,6 @@ router.use('/dofa', dofaRoutes);
 router.use('/normatividad', normatividadRoutes);
 router.use('/contexto', contextoRoutes);
 router.use('/upload', uploadRoutes);
+router.use('/procesos', procesoResponsablesRoutes);
 
 export default router;

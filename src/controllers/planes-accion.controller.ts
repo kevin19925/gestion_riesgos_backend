@@ -9,9 +9,25 @@ import prisma from '../prisma';
 export const getPlanes = async (_req: Request, res: Response) => {
   try {
     const planes = await prisma.planAccion.findMany({
+      include: {
+        riesgo: {
+          include: {
+            proceso: true
+          }
+        }
+      },
       orderBy: { createdAt: 'desc' }
     });
-    res.json(planes);
+    
+    // Mapear para incluir información del proceso en el plan
+    const planesConProceso = planes.map((plan: any) => ({
+      ...plan,
+      procesoNombre: plan.riesgo?.proceso?.nombre || null,
+      procesoId: plan.riesgo?.procesoId || null
+    }));
+    
+    console.log(`[BACKEND] getPlanes - ${planes.length} planes encontrados`);
+    res.json(planesConProceso);
   } catch (error) {
     console.error('[BACKEND] Error in getPlanes:', error);
     res.status(500).json({ error: 'Error fetching planes' });

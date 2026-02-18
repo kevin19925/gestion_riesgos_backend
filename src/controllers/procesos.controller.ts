@@ -7,6 +7,11 @@ export const getProcesos = async (req: Request, res: Response) => {
         const procesos = await prisma.proceso.findMany({
             include: {
                 responsable: true,
+                responsables: {
+                    include: {
+                        usuario: true
+                    }
+                },
                 area: {
                     include: { director: true }
                 },
@@ -15,10 +20,16 @@ export const getProcesos = async (req: Request, res: Response) => {
             orderBy: { createdAt: 'desc' }
         });
         
-        // Mapear para agregar areaNombre para facilitar uso en frontend
+        // Mapear para agregar areaNombre y lista de responsables para facilitar uso en frontend
         const procesosConAreaNombre = procesos.map(p => ({
             ...p,
-            areaNombre: p.area?.nombre || null
+            areaNombre: p.area?.nombre || null,
+            responsablesList: p.responsables?.map(r => ({
+                id: r.usuario.id,
+                nombre: r.usuario.nombre,
+                email: r.usuario.email,
+                role: r.usuario.role
+            })) || []
         }));
         
         res.json(procesosConAreaNombre);
@@ -50,6 +61,11 @@ export const getProcesoById = async (req: Request, res: Response) => {
             where: { id: procesoId },
             include: {
                 responsable: true,
+                responsables: {
+                    include: {
+                        usuario: true
+                    }
+                },
                 area: {
                     include: { director: true }
                 },
@@ -114,6 +130,11 @@ export const updateProceso = async (req: Request, res: Response) => {
         if (updateData.objetivoProceso !== undefined) {
             updateData.objetivo = updateData.objetivoProceso;
             delete updateData.objetivoProceso;
+        }
+
+        // Asegurar que sigla se guarde en mayúsculas
+        if (rest.sigla !== undefined) {
+            updateData.sigla = String(rest.sigla).toUpperCase().trim();
         }
 
         if (responsableId) updateData.responsableId = Number(responsableId);

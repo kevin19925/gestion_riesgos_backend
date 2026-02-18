@@ -306,9 +306,13 @@ export const getRiesgosRecientes = async (req: Request, res: Response) => {
 
 export const getPuntosMapa = async (req: Request, res: Response) => {
     const { procesoId } = req.query;
-    console.log(`[BACKEND] getPuntosMapa - procesoId: ${procesoId}`);
+    console.log(`[BACKEND] getPuntosMapa - procesoId: ${procesoId || 'TODOS (sin filtro)'}`);
     const where: any = {};
-    if (procesoId) where.procesoId = Number(procesoId);
+    // Solo filtrar por proceso si se especifica explícitamente
+    if (procesoId && procesoId !== 'all' && procesoId !== 'undefined' && procesoId !== 'null') {
+        where.procesoId = Number(procesoId);
+    }
+    // Si no hay procesoId o es 'all', where estará vacío y se obtendrán TODOS los riesgos
 
     try {
         // Incluir TODAS las causas para calcular correctamente los valores residuales
@@ -324,6 +328,8 @@ export const getPuntosMapa = async (req: Request, res: Response) => {
         console.log(`[BACKEND] getPuntosMapa - ${riesgos.length} riesgos encontrados`);
 
         // Incluir TODOS los riesgos con evaluación (no filtrar por valores específicos)
+        // IMPORTANTE: Solo generar UN punto por riesgo (evitar duplicados)
+        const riesgosProcesados = new Set<number>();
         const puntos = riesgos
             .filter(r => {
                 // Solo incluir riesgos con evaluación
@@ -331,8 +337,14 @@ export const getPuntosMapa = async (req: Request, res: Response) => {
                     console.warn(`[BACKEND] Riesgo ${r.id} sin evaluación, excluido del mapa`);
                     return false;
                 }
+                // Evitar duplicados: si este riesgo ya fue procesado, saltarlo
+                if (riesgosProcesados.has(r.id)) {
+                    console.warn(`[BACKEND] Riesgo ${r.id} duplicado, excluido`);
+                    return false;
+                }
                 // Incluir todos los riesgos con evaluación, incluso si no tienen valores perfectos
                 // El cálculo se hará después con fallbacks
+                riesgosProcesados.add(r.id);
                 return true;
             })
             .map(r => {
@@ -401,142 +413,108 @@ export const getPuntosMapa = async (req: Request, res: Response) => {
                     probabilidad = mejorProb;
                     impacto = mejorImp;
                 } else {
-                    // Fallback: usar probabilidad e impactoGlobal directamente
-                    probabilidad = Math.max(1, Math.min(5, Math.round(Number(r.evaluacion!.probabilidad))));
-                    impacto = Math.max(1, Math.min(5, Math.round(Number(r.evaluacion!.impactoGlobal))));
+                    // Fallback: usar probabilidad e impactoGlobal directamente, o valores por defecto
+                    const probEval = Number(r.evaluacion!.probabilidad);
+                    const impEval = Number(r.evaluacion!.impactoGlobal);
+                    
+                    if (!isNaN(probEval) && probEval >= 1 && probEval <= 5) {
+                        probabilidad = Math.round(probEval);
+                    } else {
+                        probabilidad = 1; // Valor por defecto para que aparezca en el mapa
+                    }
+                    
+                    if (!isNaN(impEval) && impEval >= 1 && impEval <= 5) {
+                        impacto = Math.round(impEval);
+                    } else {
+                        impacto = 1; // Valor por defecto para que aparezca en el mapa
+                    }
                 }
                 
                 // Calcular valores residuales
-                // Priorizar valores residuales de la evaluación (calculados por el script SQL)
-                let probabilidadResidual = r.evaluacion!.probabilidadResidual 
-                    ? Math.max(1, Math.min(5, Math.round(Number(r.evaluacion!.probabilidadResidual))))
-                    : null;
-                let impactoResidual = r.evaluacion!.impactoResidual
-                    ? Math.max(1, Math.min(5, Math.round(Number(r.evaluacion!.impactoResidual))))
-                    : null;
+                // PRIORIDAD 1: Si hay riesgoResidual en la evaluación (clasificación residual global), calcular desde ahí
+                let probabilidadResidual: number | null = null;
+                let impactoResidual: number | null = null;
                 
-                // Si hay causas con controles, calcular el máximo residual
-                if (r.causas && r.causas.length > 0) {
-                    const causasConControles = r.causas.filter((c: any) => {
-                        const tipo = String(c.tipoGestion || '').toUpperCase();
-                        return tipo === 'CONTROL' || tipo === 'AMBOS';
-                    });
+                const riesgoResidual = r.evaluacion!.riesgoResidual;
+                if (riesgoResidual && riesgoResidual > 0 && !isNaN(riesgoResidual)) {
+                    // Convertir riesgoResidual a probabilidad e impacto (mismo algoritmo que para inherente)
+                    let mejorProbRes = 1;
+                    let mejorImpRes = 1;
+                    let encontradoExacto = false;
                     
-                    console.log(`[BACKEND] Riesgo ${r.id}: ${causasConControles.length} causas con controles de ${r.causas.length} totales`);
+                    // Primero buscar coincidencia exacta
+                    for (let prob = 1; prob <= 5; prob++) {
+                        for (let imp = 1; imp <= 5; imp++) {
+                            const valor = prob === 2 && imp === 2 ? 3.99 : prob * imp;
+                            if (Math.abs(valor - riesgoResidual) < 0.01) {
+                                mejorProbRes = prob;
+                                mejorImpRes = imp;
+                                encontradoExacto = true;
+                                break;
+                            }
+                        }
+                        if (encontradoExacto) break;
+                    }
                     
-                    if (causasConControles.length > 0) {
-                        // Obtener el máximo de las calificaciones residuales
-                        const calificacionesResiduales = causasConControles
-                            .map((c: any) => {
-                                // Leer desde el JSON gestion si existe
-                                let gestionJson: any = null;
-                                try {
-                                    if (c.gestion && typeof c.gestion === 'string') {
-                                        gestionJson = JSON.parse(c.gestion);
-                                    } else if (c.gestion && typeof c.gestion === 'object') {
-                                        gestionJson = c.gestion;
-                                    }
-                                } catch (e) {
-                                    console.warn(`[BACKEND] Error parsing gestion JSON para causa ${c.id}:`, e);
-                                }
+                    // Si no hay coincidencia exacta, buscar el más cercano >= riesgoResidual
+                    if (!encontradoExacto) {
+                        let menorDiferencia = Infinity;
+                        for (let prob = 1; prob <= 5; prob++) {
+                            for (let imp = 1; imp <= 5; imp++) {
+                                const valor = prob === 2 && imp === 2 ? 3.99 : prob * imp;
                                 
-                                // Priorizar calificacionResidual del JSON, luego riesgoResidual, luego calcular
-                                if (gestionJson) {
-                                    if (gestionJson.calificacionResidual !== undefined && gestionJson.calificacionResidual !== null && gestionJson.calificacionResidual > 0) {
-                                        return Number(gestionJson.calificacionResidual);
-                                    }
-                                    if (gestionJson.riesgoResidual !== undefined && gestionJson.riesgoResidual !== null && gestionJson.riesgoResidual > 0) {
-                                        return Number(gestionJson.riesgoResidual);
-                                    }
-                                    if (gestionJson.frecuenciaResidual !== undefined && gestionJson.impactoResidual !== undefined) {
-                                        const freqRes = Number(gestionJson.frecuenciaResidual);
-                                        const impRes = Number(gestionJson.impactoResidual);
-                                        const cal = freqRes === 2 && impRes === 2 ? 3.99 : freqRes * impRes;
-                                        return cal;
-                                    }
-                                }
-                                
-                                // Fallback: intentar leer directamente de la causa (por si acaso se añadieron columnas)
-                                if (c.calificacionResidual !== undefined && c.calificacionResidual !== null && c.calificacionResidual > 0) {
-                                    return Number(c.calificacionResidual);
-                                }
-                                if (c.riesgoResidual !== undefined && c.riesgoResidual !== null && c.riesgoResidual > 0) {
-                                    return Number(c.riesgoResidual);
-                                }
-                                
-                                // Fallback final: calcular desde valores inherentes
-                                const freqInh = Number(c.frecuencia || probabilidad);
-                                const impInh = Number(impacto);
-                                const cal = freqInh === 2 && impInh === 2 ? 3.99 : freqInh * impInh;
-                                return cal;
-                            })
-                            .filter((cal: number) => !isNaN(cal) && cal > 0);
-                        
-                        if (calificacionesResiduales.length > 0) {
-                            const calificacionMaxResidual = Math.max(...calificacionesResiduales);
-                            
-                            console.log(`[BACKEND] Riesgo ${r.id}: Calificación máxima residual = ${calificacionMaxResidual}`);
-                            
-                            // Convertir calificación residual a probabilidad e impacto para el mapa
-                            // Usar el mismo algoritmo que para inherente
-                            let mejorProbRes = 1;
-                            let mejorImpRes = 1;
-                            let menorDiferenciaRes = Math.abs(calificacionMaxResidual - (mejorProbRes * mejorImpRes));
-                            
-                            for (let prob = 1; prob <= 5; prob++) {
-                                for (let imp = 1; imp <= 5; imp++) {
-                                    const valor = prob === 2 && imp === 2 ? 3.99 : prob * imp;
-                                    
-                                    if (valor >= calificacionMaxResidual) {
-                                        const diferencia = valor - calificacionMaxResidual;
-                                        if (diferencia < menorDiferenciaRes || (menorDiferenciaRes > 0 && valor < (mejorProbRes * mejorImpRes))) {
-                                            menorDiferenciaRes = diferencia;
-                                            mejorProbRes = prob;
-                                            mejorImpRes = imp;
-                                        }
-                                    } else {
-                                        const diferencia = Math.abs(calificacionMaxResidual - valor);
-                                        if (diferencia < menorDiferenciaRes) {
-                                            menorDiferenciaRes = diferencia;
-                                            mejorProbRes = prob;
-                                            mejorImpRes = imp;
-                                        }
+                                // Priorizar valores que sean >= riesgoResidual
+                                if (valor >= riesgoResidual) {
+                                    const diferencia = valor - riesgoResidual;
+                                    if (diferencia < menorDiferencia) {
+                                        menorDiferencia = diferencia;
+                                        mejorProbRes = prob;
+                                        mejorImpRes = imp;
                                     }
                                 }
                             }
-                            
-                            probabilidadResidual = mejorProbRes;
-                            impactoResidual = mejorImpRes;
-                            
-                            console.log(`[BACKEND] Riesgo ${r.id}: Valores residuales calculados - Prob=${probabilidadResidual}, Imp=${impactoResidual}`);
-                        } else {
-                            console.warn(`[BACKEND] Riesgo ${r.id}: Causas con controles pero sin calificaciones residuales válidas`);
                         }
-                    } else {
-                        // Si no hay controles pero hay valores residuales en la evaluación, usarlos
-                        if (!probabilidadResidual || !impactoResidual) {
-                            probabilidadResidual = probabilidad;
-                            impactoResidual = impacto;
-                            console.log(`[BACKEND] Riesgo ${r.id}: Sin controles, usando valores inherentes para residual`);
-                        } else {
-                            console.log(`[BACKEND] Riesgo ${r.id}: Sin controles, usando valores residuales de evaluación`);
+                        
+                        // Si aún no hay valor >=, usar el más cercano
+                        if (menorDiferencia === Infinity) {
+                            for (let prob = 1; prob <= 5; prob++) {
+                                for (let imp = 1; imp <= 5; imp++) {
+                                    const valor = prob === 2 && imp === 2 ? 3.99 : prob * imp;
+                                    const diferencia = Math.abs(riesgoResidual - valor);
+                                    if (diferencia < menorDiferencia) {
+                                        menorDiferencia = diferencia;
+                                        mejorProbRes = prob;
+                                        mejorImpRes = imp;
+                                    }
+                                }
+                            }
                         }
                     }
+                    
+                    probabilidadResidual = mejorProbRes;
+                    impactoResidual = mejorImpRes;
+                    
+                    console.log(`[BACKEND] Riesgo ${r.id}: Valores residuales desde riesgoResidual=${riesgoResidual} -> Prob=${probabilidadResidual}, Imp=${impactoResidual}`);
                 } else {
-                    // Si no hay causas pero hay valores residuales en la evaluación, usarlos
-                    if (!probabilidadResidual || !impactoResidual) {
-                        probabilidadResidual = probabilidad;
-                        impactoResidual = impacto;
-                        console.log(`[BACKEND] Riesgo ${r.id}: Sin causas, usando valores inherentes para residual`);
-                    } else {
-                        console.log(`[BACKEND] Riesgo ${r.id}: Sin causas, usando valores residuales de evaluación`);
+                    // PRIORIDAD 2: Si no hay riesgoResidual, usar valores residuales directos de la evaluación
+                    probabilidadResidual = r.evaluacion!.probabilidadResidual 
+                        ? Math.max(1, Math.min(5, Math.round(Number(r.evaluacion!.probabilidadResidual))))
+                        : null;
+                    impactoResidual = r.evaluacion!.impactoResidual
+                        ? Math.max(1, Math.min(5, Math.round(Number(r.evaluacion!.impactoResidual))))
+                        : null;
+                    
+                    if (probabilidadResidual && impactoResidual) {
+                        console.log(`[BACKEND] Riesgo ${r.id}: Valores residuales directos de evaluación - Prob=${probabilidadResidual}, Imp=${impactoResidual}`);
                     }
                 }
                 
-                // Fallback final: si aún no hay valores residuales, usar inherentes
+                // PRIORIDAD 3: Si aún no hay valores residuales, usar inherentes
+                // (Esto es para riesgos sin controles, que deben aparecer igual en ambos mapas)
                 if (!probabilidadResidual || !impactoResidual) {
                     probabilidadResidual = probabilidad;
                     impactoResidual = impacto;
+                    console.log(`[BACKEND] Riesgo ${r.id}: Sin valores residuales, usando inherentes - Prob=${probabilidadResidual}, Imp=${impactoResidual}`);
                 }
                 
                 return {
@@ -552,8 +530,8 @@ export const getPuntosMapa = async (req: Request, res: Response) => {
                     nivelRiesgo: r.evaluacion!.nivelRiesgo,
                     clasificacion: r.clasificacion,
                     numero: r.numero,
-                    siglaGerencia: r.siglaGerencia || '',
-                    numeroIdentificacion: r.numeroIdentificacion || `${r.id}R`,
+                    siglaGerencia: r.proceso?.sigla || r.siglaGerencia || '', // Usar sigla del proceso, fallback a siglaGerencia por compatibilidad
+                    numeroIdentificacion: r.numeroIdentificacion || `${r.numero || r.id}${r.proceso?.sigla || 'R'}`,
                     procesoId: r.procesoId,
                     procesoNombre: r.proceso?.nombre || 'Proceso desconocido',
                     // Campos adicionales del riesgo
