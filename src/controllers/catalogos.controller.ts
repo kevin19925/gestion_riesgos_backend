@@ -406,7 +406,7 @@ export const deleteImpactoTipo = async (req: Request, res: Response) => {
 };
 
 export const updateFrecuencias = async (req: Request, res: Response) => {
-    const data = req.body as { label: string; descripcion: string }[];
+    const data = req.body as { label: string; descripcion: string; peso?: number }[];
     if (!Array.isArray(data)) {
         return res.status(400).json({ error: 'Formato invalido' });
     }
@@ -414,7 +414,11 @@ export const updateFrecuencias = async (req: Request, res: Response) => {
         await prisma.$transaction([
             prisma.frecuenciaCatalog.deleteMany({}),
             prisma.frecuenciaCatalog.createMany({
-                data: data.map((f) => ({ label: f.label, descripcion: f.descripcion }))
+                data: data.map((f) => ({ 
+                    label: f.label, 
+                    descripcion: f.descripcion,
+                    peso: f.peso !== undefined && f.peso !== null ? f.peso : 3 // Default 3 si no se proporciona
+                }))
             })
         ]);
         const items = await prisma.frecuenciaCatalog.findMany({ orderBy: { id: 'asc' } });
@@ -498,6 +502,65 @@ export const getEjesMapa = async (req: Request, res: Response) => {
     };
     console.log('Returning ejes:', JSON.stringify(ejes));
     res.json(ejes);
+};
+
+export const getPesosImpacto = async (_req: Request, res: Response) => {
+    try {
+        const config = await prisma.configuracion.findUnique({
+            where: { clave: 'pesos_impacto' }
+        });
+        
+        if (config) {
+            const pesos = JSON.parse(config.valor);
+            res.json(pesos);
+        } else {
+            // Retornar valores por defecto
+            const defaultPesos = [
+                { key: 'economico', label: 'Impacto económico', porcentaje: 22 },
+                { key: 'legal', label: 'Legal/Normativo', porcentaje: 22 },
+                { key: 'reputacion', label: 'Reputacional', porcentaje: 22 },
+                { key: 'procesos', label: 'Procesos', porcentaje: 14 },
+                { key: 'ambiental', label: 'Ambiental', porcentaje: 10 },
+                { key: 'personas', label: 'Personas', porcentaje: 10 },
+                { key: 'confidencialidadSGSI', label: 'Confidencialidad SGSI', porcentaje: 0 },
+                { key: 'disponibilidadSGSI', label: 'Disponibilidad SGSI', porcentaje: 0 },
+                { key: 'integridadSGSI', label: 'Integridad SGSI', porcentaje: 0 },
+            ];
+            res.json(defaultPesos);
+        }
+    } catch (error) {
+        console.error('Error in getPesosImpacto:', error);
+        res.status(500).json({ error: 'Error fetching pesos impacto' });
+    }
+};
+
+export const updatePesosImpacto = async (req: Request, res: Response) => {
+    const { pesos } = req.body;
+    if (!Array.isArray(pesos)) {
+        return res.status(400).json({ error: 'Formato inválido: se espera un array de pesos' });
+    }
+    
+    try {
+        const valor = JSON.stringify(pesos);
+        const config = await prisma.configuracion.upsert({
+            where: { clave: 'pesos_impacto' },
+            create: {
+                clave: 'pesos_impacto',
+                valor,
+                tipo: 'json',
+                descripcion: 'Pesos (porcentajes) de las dimensiones de impacto para calcular Calificación Global Impacto'
+            },
+            update: {
+                valor
+            }
+        });
+        
+        const pesosParsed = JSON.parse(config.valor);
+        res.json(pesosParsed);
+    } catch (error) {
+        console.error('Error in updatePesosImpacto:', error);
+        res.status(500).json({ error: 'Error updating pesos impacto' });
+    }
 };
 
 export const updateConfiguracion = async (req: Request, res: Response) => {
