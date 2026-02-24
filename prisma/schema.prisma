@@ -414,6 +414,7 @@ model FrecuenciaCatalog {
   id          Int    @id @default(autoincrement())
   label       String @unique
   descripcion String
+  peso        Int?   @default(3) // Peso de la frecuencia (1-5) para cálculos
 }
 
 model FuenteCatalog {
@@ -468,6 +469,9 @@ model MapaConfig {
   ejes        String? // JSON storing X and Y definitions
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
+  
+  // Relación con configuración de calificación inherente
+  calificacionInherenteConfig CalificacionInherenteConfig?
 }
 
 model Configuracion {
@@ -476,6 +480,119 @@ model Configuracion {
   valor       String
   tipo        String
   descripcion String?
+}
+
+// ============================================
+// Configuración de Calificación Inherente
+// ============================================
+
+model CalificacionInherenteConfig {
+  id          Int      @id @default(autoincrement())
+  nombre      String   @unique @default("Configuración Principal")
+  activa      Boolean  @default(true)
+  descripcion String?
+  
+  // Relación con mapa (para sincronización)
+  mapaConfigId Int?    @unique
+  mapaConfig   MapaConfig? @relation(fields: [mapaConfigId], references: [id], onDelete: SetNull)
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  // Relaciones
+  formulaBase     FormulaCalificacionInherente?
+  excepciones     ExcepcionCalificacion[]
+  rangos          RangoCalificacion[]
+  reglaAgregacion ReglaAgregacionCalificacion?
+}
+
+// Fórmula base: Define QUÉ campos se multiplican
+model FormulaCalificacionInherente {
+  id          Int      @id @default(autoincrement())
+  configId    Int      @unique
+  config      CalificacionInherenteConfig @relation(fields: [configId], references: [id], onDelete: Cascade)
+  
+  // Tipo de operación: "multiplicacion", "suma", "promedio", etc.
+  tipoOperacion String  @default("multiplicacion")
+  
+  // Campos que participan en la fórmula (JSON array)
+  // Ejemplo: [{"tabla": "CausaRiesgo", "campo": "frecuencia"}, {"tabla": "CausaRiesgo", "campo": "calificacionGlobalImpacto"}]
+  campos       Json
+  
+  // Orden de operación (si hay múltiples campos)
+  orden        Int      @default(1)
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+// Excepciones: Reglas especiales (ej: 2x2 = 3.99)
+model ExcepcionCalificacion {
+  id          Int      @id @default(autoincrement())
+  configId    Int
+  config      CalificacionInherenteConfig @relation(fields: [configId], references: [id], onDelete: Cascade)
+  
+  // Condiciones (JSON): {"frecuencia": 2, "calificacionGlobalImpacto": 2}
+  condiciones Json
+  
+  // Resultado cuando se cumple la condición
+  resultado   Float    // 3.99
+  
+  // Prioridad (si hay múltiples excepciones, se evalúan en orden)
+  prioridad   Int      @default(1)
+  
+  activa      Boolean  @default(true)
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  @@index([configId])
+}
+
+// Rangos de clasificación: Define los niveles de riesgo
+model RangoCalificacion {
+  id          Int      @id @default(autoincrement())
+  configId    Int
+  config      CalificacionInherenteConfig @relation(fields: [configId], references: [id], onDelete: Cascade)
+  
+  // Nivel de riesgo (string): "Crítico", "Alto", "Medio", "Bajo"
+  nivelNombre String
+  
+  // Rango: [min, max] o [min, max) según incluirMaximo
+  valorMinimo Float
+  valorMaximo Float
+  incluirMinimo Boolean @default(true)
+  incluirMaximo Boolean @default(true)
+  
+  // Orden de evaluación (de mayor a menor, para evaluar primero los rangos más altos)
+  orden       Int
+  
+  activo      Boolean  @default(true)
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  @@index([configId])
+  @@index([configId, orden])
+}
+
+// Regla de agregación: Cómo se calcula la calificación inherente GLOBAL del riesgo
+model ReglaAgregacionCalificacion {
+  id          Int      @id @default(autoincrement())
+  configId    Int      @unique
+  config      CalificacionInherenteConfig @relation(fields: [configId], references: [id], onDelete: Cascade)
+  
+  // Tipo: "maximo", "promedio", "suma", "minimo"
+  tipoAgregacion String  @default("maximo")
+  
+  // Tabla origen: "CausaRiesgo"
+  tablaOrigen   String
+  
+  // Campo origen: "calificacionInherente"
+  campoOrigen   String
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 }
 
 // ============================================
