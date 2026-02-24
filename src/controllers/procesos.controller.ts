@@ -9,7 +9,12 @@ export const getProcesos = async (req: Request, res: Response) => {
                 responsable: true,
                 responsables: {
                     include: {
-                        usuario: true
+                        usuario: {
+                            include: {
+                                role: true,
+                                cargo: true
+                            }
+                        }
                     }
                 },
                 area: {
@@ -21,21 +26,35 @@ export const getProcesos = async (req: Request, res: Response) => {
         });
         
         // Mapear para agregar areaNombre y lista de responsables para facilitar uso en frontend
-        const procesosConAreaNombre = procesos.map(p => ({
-            ...p,
-            areaNombre: p.area?.nombre || null,
-            responsablesList: p.responsables?.map(r => ({
-                id: r.usuario.id,
-                nombre: r.usuario.nombre,
-                email: r.usuario.email,
-                role: r.usuario.role
-            })) || []
-        }));
+        const procesosConAreaNombre = procesos.map(p => {
+            const responsablesList = (p.responsables || []).map((r: any) => {
+                // Acceder al campo modo de forma segura usando 'as any'
+                // Si el campo no existe en la BD, será undefined/null
+                const modo = r.modo !== undefined ? r.modo : null;
+                return {
+                    id: r.usuario.id,
+                    nombre: r.usuario.nombre,
+                    email: r.usuario.email,
+                    role: r.usuario.role?.codigo || null,
+                    modo: modo
+                };
+            });
+            
+            return {
+                ...p,
+                areaNombre: p.area?.nombre || null,
+                responsablesList: responsablesList
+            };
+        });
         
         res.json(procesosConAreaNombre);
-    } catch (error) {
+    } catch (error: any) {
         console.error('[BACKEND] Error in getProcesos:', error);
-        res.status(500).json({ error: 'Error fetching procesos' });
+        console.error('[BACKEND] Error details:', error?.message, error?.stack);
+        res.status(500).json({ 
+            error: 'Error fetching procesos',
+            details: error?.message || String(error)
+        });
     }
 };
 
