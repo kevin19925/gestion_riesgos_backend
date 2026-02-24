@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import prisma from '../prisma';
+import { recalcularRiesgoInherenteDesdeCausas } from './riesgos.controller';
 
 export const getListasValores = async (req: Request, res: Response) => {
     // Return hardcoded or dynamic lists
@@ -556,7 +557,66 @@ export const updatePesosImpacto = async (req: Request, res: Response) => {
         });
         
         const pesosParsed = JSON.parse(config.valor);
+
+        // Responder inmediatamente al cliente
         res.json(pesosParsed);
+
+        // Ejecutar recálculo en segundo plano (no bloquea la respuesta)
+        // Recalcular automáticamente la calificación de impacto global y el riesgo inherente
+        // de TODOS los riesgos, porque el cambio de porcentajes afecta a todo el universo.
+        setImmediate(async () => {
+            try {
+                console.log('[BACKEND] updatePesosImpacto - Iniciando recálculo en segundo plano...');
+                const startTime = Date.now();
+                
+                // Obtener todos los IDs de riesgos que tienen evaluación
+                const riesgos = await prisma.riesgo.findMany({
+                    select: { id: true },
+                    where: {
+                        evaluacion: {
+                            isNot: null
+                        }
+                    },
+                    orderBy: { id: 'asc' }
+                });
+                
+                console.log(`[BACKEND] updatePesosImpacto - Encontrados ${riesgos.length} riesgos con evaluación para recalcular`);
+                
+                if (riesgos.length === 0) {
+                    console.log('[BACKEND] updatePesosImpacto - No hay riesgos para recalcular');
+                    return;
+                }
+                
+                // Procesar en lotes de 50 para optimizar
+                const BATCH_SIZE = 50;
+                let processed = 0;
+                
+                for (let i = 0; i < riesgos.length; i += BATCH_SIZE) {
+                    const batch = riesgos.slice(i, i + BATCH_SIZE);
+                    
+                    // Procesar lote en paralelo
+                    await Promise.all(
+                        batch.map(async ({ id }) => {
+                            try {
+                                await recalcularRiesgoInherenteDesdeCausas(id);
+                            } catch (error) {
+                                console.error(`[BACKEND] updatePesosImpacto - Error al recalcular riesgo ${id}:`, error);
+                            }
+                        })
+                    );
+                    
+                    processed += batch.length;
+                    console.log(`[BACKEND] updatePesosImpacto - Procesados ${processed}/${riesgos.length} riesgos`);
+                }
+                
+                const duration = Date.now() - startTime;
+                console.log(`[BACKEND] updatePesosImpacto - ✅ Recalculación completada en ${duration}ms (${riesgos.length} riesgos)`);
+            } catch (error: any) {
+                console.error('[BACKEND] updatePesosImpacto - Error durante el recálculo en segundo plano:', error);
+                console.error('[BACKEND] updatePesosImpacto - Stack:', error?.stack || 'N/A');
+                // No fallar la petición si el recálculo falla, pero registrar el error
+            }
+        });
     } catch (error) {
         console.error('Error in updatePesosImpacto:', error);
         res.status(500).json({ error: 'Error updating pesos impacto' });

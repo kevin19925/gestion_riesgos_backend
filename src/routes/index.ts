@@ -10,6 +10,7 @@ import utilidadesRoutes from './utilidades.routes';
 import areasRoutes from './areas.routes';
 import cargosRoutes from './cargos.routes';
 import gerenciasRoutes from './gerencias.routes';
+import rolesRoutes from './roles.routes';
 import controlesRoutes from './controles.routes';
 import incidenciasRoutes from './incidencias.routes';
 import planesAccionRoutes from './planes-accion.routes';
@@ -42,6 +43,7 @@ router.use('/priorizaciones', priorizacionesRoutes);
 router.use('/areas', areasRoutes);
 router.use('/cargos', cargosRoutes);
 router.use('/gerencias', gerenciasRoutes);
+router.use('/roles', rolesRoutes);
 
 // New Routes - Risk Management
 router.use('/controles', controlesRoutes);
