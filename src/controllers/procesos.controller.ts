@@ -103,6 +103,7 @@ export const createProceso = async (req: Request, res: Response) => {
         // Solo agregar campos opcionales si vienen y no son nulos
         if (req.body.vicepresidencia) data.vicepresidencia = req.body.vicepresidencia;
         if (req.body.gerencia) data.gerencia = req.body.gerencia;
+        if (req.body.sigla !== undefined) data.sigla = String(req.body.sigla).toUpperCase().trim();
         if (req.body.estado) data.estado = req.body.estado;
         if (req.body.activo !== undefined) data.activo = Boolean(req.body.activo);
 
@@ -133,8 +134,19 @@ export const updateProceso = async (req: Request, res: Response) => {
         }
 
         // Asegurar que sigla se guarde en mayúsculas
+        let siglaActualizada = false;
+        let nuevaSigla = '';
         if (rest.sigla !== undefined) {
-            updateData.sigla = String(rest.sigla).toUpperCase().trim();
+            nuevaSigla = String(rest.sigla).toUpperCase().trim();
+            // Verificar si la sigla realmente cambió
+            const procesoActual = await prisma.proceso.findUnique({
+                where: { id },
+                select: { sigla: true }
+            });
+            if (procesoActual?.sigla !== nuevaSigla) {
+                siglaActualizada = true;
+                updateData.sigla = nuevaSigla;
+            }
         }
 
         if (responsableId) updateData.responsableId = Number(responsableId);
@@ -195,6 +207,34 @@ export const updateProceso = async (req: Request, res: Response) => {
                 participantes: true,
             }
         });
+
+        // Si se actualizó la sigla, actualizar numeroIdentificacion de todos los riesgos del proceso
+        if (siglaActualizada && nuevaSigla) {
+            try {
+                const riesgos = await prisma.riesgo.findMany({
+                    where: { procesoId: id },
+                    select: { id: true, numero: true }
+                });
+
+                // Actualizar numeroIdentificacion de cada riesgo: número + nueva sigla
+                await Promise.all(
+                    riesgos.map(riesgo => 
+                        prisma.riesgo.update({
+                            where: { id: riesgo.id },
+                            data: {
+                                numeroIdentificacion: `${riesgo.numero}${nuevaSigla}`
+                            }
+                        })
+                    )
+                );
+
+                console.log(`[BACKEND] updateProceso - Actualizados ${riesgos.length} numeroIdentificacion de riesgos con nueva sigla: ${nuevaSigla}`);
+            } catch (error) {
+                console.error('[BACKEND] Error actualizando numeroIdentificacion de riesgos:', error);
+                // No fallar la actualización del proceso si falla la actualización de riesgos
+            }
+        }
+
         res.json(proceso);
     } catch (error) {
         console.error('[BACKEND] Error in updateProceso:', error);
