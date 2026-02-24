@@ -4,7 +4,10 @@ import prisma from '../prisma';
 export const getUsuarios = async (req: Request, res: Response) => {
     try {
         const users = await prisma.usuario.findMany({
-            include: { cargo: true }
+            include: { 
+                cargo: true,
+                role: true
+            }
         });
         res.json(users);
     } catch (error) {
@@ -17,7 +20,10 @@ export const getUsuarioById = async (req: Request, res: Response) => {
     try {
         const user = await prisma.usuario.findUnique({
             where: { id },
-            include: { cargo: true }
+            include: { 
+                cargo: true,
+                role: true
+            }
         });
         if (!user) return res.status(404).json({ error: 'User not found' });
         res.json(user);
@@ -28,17 +34,25 @@ export const getUsuarioById = async (req: Request, res: Response) => {
 
 export const createUsuario = async (req: Request, res: Response) => {
     try {
-        const { nombre, email, password, role, cargoId, activo } = req.body;
+        const { nombre, email, password, roleId, cargoId, activo } = req.body;
+        
+        if (!roleId) {
+            return res.status(400).json({ error: 'roleId is required' });
+        }
+
         const user = await prisma.usuario.create({
             data: {
                 nombre,
                 email,
                 password: password || 'comware123',
-                role,
+                roleId: Number(roleId),
                 cargoId: cargoId ? Number(cargoId) : null,
                 activo: activo ?? true
             },
-            include: { cargo: true }
+            include: { 
+                cargo: true,
+                role: true
+            }
         });
         res.status(201).json(user);
     } catch (error) {
@@ -50,18 +64,23 @@ export const createUsuario = async (req: Request, res: Response) => {
 export const updateUsuario = async (req: Request, res: Response) => {
     const id = Number(req.params.id);
     try {
-        const { nombre, email, password, role, cargoId, activo } = req.body;
+        const { nombre, email, password, roleId, cargoId, activo } = req.body;
+        const updateData: any = {};
+        
+        if (nombre !== undefined) updateData.nombre = nombre;
+        if (email !== undefined) updateData.email = email;
+        if (password !== undefined) updateData.password = password;
+        if (roleId !== undefined) updateData.roleId = Number(roleId);
+        if (cargoId !== undefined) updateData.cargoId = cargoId ? Number(cargoId) : null;
+        if (activo !== undefined) updateData.activo = activo;
+
         const user = await prisma.usuario.update({
             where: { id },
-            data: {
-                nombre,
-                email,
-                password,
-                role,
-                cargoId: cargoId ? Number(cargoId) : null,
-                activo
-            },
-            include: { cargo: true }
+            data: updateData,
+            include: { 
+                cargo: true,
+                role: true
+            }
         });
         res.json(user);
     } catch (error) {

@@ -695,9 +695,12 @@ export const getCausas = async (req: Request, res: Response) => {
 
 /**
  * Función helper para recalcular automáticamente riesgoInherente, probabilidad e impactoGlobal
- * cuando se crea, actualiza o elimina una causa
+ * cuando se crea, actualiza o elimina una causa, o cuando cambian los pesos de impacto.
+ *
+ * También es reutilizada desde otros controladores (por ejemplo, al actualizar los pesos
+ * en catálogo), por eso se exporta.
  */
-async function recalcularRiesgoInherenteDesdeCausas(riesgoId: number): Promise<void> {
+export async function recalcularRiesgoInherenteDesdeCausas(riesgoId: number): Promise<void> {
     try {
         // Obtener el riesgo con su evaluación y causas
         const riesgo = await prisma.riesgo.findUnique({
@@ -728,14 +731,46 @@ async function recalcularRiesgoInherenteDesdeCausas(riesgoId: number): Promise<v
             return;
         }
 
-        // Calcular calificación global impacto desde campos individuales
-        const calificacionGlobalImpacto = Math.round(
-            (Number(riesgo.evaluacion.impactoPersonas || 1) * 0.10) +
-            (Number(riesgo.evaluacion.impactoLegal || 1) * 0.22) +
-            (Number(riesgo.evaluacion.impactoAmbiental || 1) * 0.10) +
-            (Number(riesgo.evaluacion.impactoProcesos || 1) * 0.14) +
-            (Number(riesgo.evaluacion.impactoReputacion || 1) * 0.22) +
-            (Number(riesgo.evaluacion.impactoEconomico || 1) * 0.22)
+        // Obtener pesos de impacto desde la configuración
+        let pesosImpacto: Record<string, number> = {
+            personas: 0.10,
+            legal: 0.22,
+            ambiental: 0.10,
+            procesos: 0.14,
+            reputacion: 0.22,
+            economico: 0.22,
+            confidencialidadSGSI: 0.0,
+            disponibilidadSGSI: 0.0,
+            integridadSGSI: 0.0
+        };
+        
+        try {
+            const config = await prisma.configuracion.findUnique({
+                where: { clave: 'pesos_impacto' }
+            });
+            
+            if (config) {
+                const pesosArray = JSON.parse(config.valor) as Array<{ key: string; porcentaje: number }>;
+                pesosImpacto = {};
+                pesosArray.forEach(p => {
+                    pesosImpacto[p.key] = p.porcentaje / 100; // Convertir porcentaje (0-100) a decimal (0-1)
+                });
+            }
+        } catch (error) {
+            console.error('[BACKEND] Error obteniendo pesos de impacto, usando valores por defecto:', error);
+        }
+        
+        // Calcular calificación global impacto: nivel * porcentaje_decimal, sumar todos, redondear hacia arriba
+        const calificacionGlobalImpacto = Math.ceil(
+            (Number(riesgo.evaluacion.impactoPersonas || 1) * (pesosImpacto.personas || 0)) +
+            (Number(riesgo.evaluacion.impactoLegal || 1) * (pesosImpacto.legal || 0)) +
+            (Number(riesgo.evaluacion.impactoAmbiental || 1) * (pesosImpacto.ambiental || 0)) +
+            (Number(riesgo.evaluacion.impactoProcesos || 1) * (pesosImpacto.procesos || 0)) +
+            (Number(riesgo.evaluacion.impactoReputacion || 1) * (pesosImpacto.reputacion || 0)) +
+            (Number(riesgo.evaluacion.impactoEconomico || 1) * (pesosImpacto.economico || 0)) +
+            (Number(riesgo.evaluacion.confidencialidadSGSI || 1) * (pesosImpacto.confidencialidadSGSI || 0)) +
+            (Number(riesgo.evaluacion.disponibilidadSGSI || 1) * (pesosImpacto.disponibilidadSGSI || 0)) +
+            (Number(riesgo.evaluacion.integridadSGSI || 1) * (pesosImpacto.integridadSGSI || 0))
         );
 
         // Obtener todas las frecuencias del catálogo
@@ -856,18 +891,18 @@ async function recalcularRiesgoInherenteDesdeCausas(riesgoId: number): Promise<v
             }
         }
 
-        // Actualizar evaluación
+        // Actualizar evaluación - guardar el impacto global calculado con los nuevos pesos
         await prisma.evaluacionRiesgo.update({
             where: { riesgoId },
             data: {
                 riesgoInherente: Math.round(maxCalificacionInherente),
                 nivelRiesgo,
                 probabilidad: mejorProb,
-                impactoGlobal: mejorImp
+                impactoGlobal: calificacionGlobalImpacto // Guardar el impacto global calculado (redondeado hacia arriba)
             }
         });
 
-        console.log(`[BACKEND] ✅ Riesgo ${riesgoId}: Recalculado automáticamente - riesgoInherente=${Math.round(maxCalificacionInherente)}, Prob=${mejorProb}, Imp=${mejorImp}, Nivel=${nivelRiesgo}`);
+        console.log(`[BACKEND] ✅ Riesgo ${riesgoId}: Recalculado automáticamente - riesgoInherente=${Math.round(maxCalificacionInherente)}, Prob=${mejorProb}, ImpGlobal=${calificacionGlobalImpacto} (redondeado hacia arriba), Nivel=${nivelRiesgo}`);
     } catch (error) {
         console.error(`[BACKEND] ❌ Error al recalcular riesgo ${riesgoId} desde causas:`, error);
         // No lanzar error para no interrumpir la operación principal
