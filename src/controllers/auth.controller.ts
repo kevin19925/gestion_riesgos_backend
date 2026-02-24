@@ -14,7 +14,10 @@ export const login = async (req: Request, res: Response) => {
                 ],
                 password: password
             },
-            include: { cargo: true }
+            include: { 
+                cargo: true,
+                role: true
+            }
         });
 
         if (!user) {
@@ -28,6 +31,7 @@ export const login = async (req: Request, res: Response) => {
         }
 
         console.log(`[BACKEND] Login successful: ${user.email}`);
+        const roleCodigo = user.role?.codigo || 'usuario';
         res.json({
             success: true,
             user: {
@@ -35,10 +39,10 @@ export const login = async (req: Request, res: Response) => {
                 username: user.email.split('@')[0],
                 email: user.email,
                 fullName: user.nombre,
-                role: user.role,
+                role: roleCodigo,
                 department: user.cargo?.nombre || 'General',
-                position: user.cargo?.nombre || user.role,
-                esDuenoProcesos: user.role === 'dueño_procesos'
+                position: user.cargo?.nombre || roleCodigo,
+                esDuenoProcesos: roleCodigo === 'dueño_procesos'
             }
         });
     } catch (error) {
@@ -55,19 +59,23 @@ export const getMe = async (req: Request, res: Response) => {
     try {
         const user = await prisma.usuario.findUnique({
             where: { id: Number(id) },
-            include: { cargo: true }
+            include: { 
+                cargo: true,
+                role: true
+            }
         });
         if (!user) return res.status(404).json({ error: 'User not found' });
 
+        const roleCodigo = user.role?.codigo || 'usuario';
         res.json({
             id: user.id,
             username: user.email.split('@')[0],
             email: user.email,
             fullName: user.nombre,
-            role: user.role,
+            role: roleCodigo,
             department: user.cargo?.nombre || 'General',
-            position: user.cargo?.nombre || user.role,
-            esDuenoProcesos: user.role === 'dueño_procesos'
+            position: user.cargo?.nombre || roleCodigo,
+            esDuenoProcesos: roleCodigo === 'dueño_procesos'
         });
     } catch (error) {
         console.error('[BACKEND] getMe error:', error);
