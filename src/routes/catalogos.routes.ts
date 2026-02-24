@@ -5,6 +5,7 @@ import {
     getFormulas, getMapaConfig,
     getFrecuencias, getFuentes, getOrigenes, getTiposProceso, getConsecuencias, getNivelesRiesgo, getImpactos, getEjesMapa,
     getVicepresidencias, updateConfiguracion, updateMapaConfig,
+    getPesosImpacto, updatePesosImpacto,
     updateFrecuencias, updateFuentes, updateOrigenes, updateConsecuencias,
     createImpactoTipo, updateImpactoNiveles, deleteImpactoTipo,
     createSubtipo, updateSubtipo, deleteSubtipo
@@ -52,5 +53,8 @@ router.delete('/impactos/:id', deleteImpactoTipo);
 
 router.put('/configuraciones/:id', updateConfiguracion);
 router.put('/mapa-config', updateMapaConfig);
+
+router.get('/pesos-impacto', getPesosImpacto);
+router.put('/pesos-impacto', updatePesosImpacto);
 
 export default router;

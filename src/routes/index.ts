@@ -19,6 +19,7 @@ import normatividadRoutes from './normatividad.routes';
 import contextoRoutes from './contexto.routes';
 import uploadRoutes from './upload.routes';
 import procesoResponsablesRoutes from './proceso-responsables.routes';
+import calificacionInherenteRoutes from './calificacion-inherente.routes';
 
 const router = Router();
 
@@ -52,5 +53,6 @@ router.use('/normatividad', normatividadRoutes);
 router.use('/contexto', contextoRoutes);
 router.use('/upload', uploadRoutes);
 router.use('/procesos', procesoResponsablesRoutes);
+router.use('/calificacion-inherente', calificacionInherenteRoutes);
 
 export default router;

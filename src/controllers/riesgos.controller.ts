@@ -3,7 +3,10 @@ import prisma from '../prisma';
 
 export const getRiesgos = async (req: Request, res: Response) => {
     const { procesoId, clasificacion, busqueda, page, pageSize, zona, includeCausas } = req.query;
-    console.log('[BACKEND] getRiesgos - query:', JSON.stringify(req.query, null, 2));
+    // OPTIMIZADO: Reducir logging en producción para mejor rendimiento
+    if (process.env.NODE_ENV === 'development') {
+        console.log('[BACKEND] getRiesgos - query:', JSON.stringify(req.query, null, 2));
+    }
     const where: any = {};
     if (procesoId) {
         const parsedProcesoId = Number(procesoId);
@@ -11,30 +14,71 @@ export const getRiesgos = async (req: Request, res: Response) => {
             where.procesoId = parsedProcesoId;
         }
     }
-    if (clasificacion && clasificacion !== 'all') where.clasificacion = String(clasificacion);
+    // OPTIMIZADO: Filtro de clasificación - usar evaluacion.nivelRiesgo de forma segura
+    // Nota: Si hay un filtro de clasificación, solo mostrar riesgos que tengan evaluación
+    if (clasificacion && clasificacion !== 'all') {
+        where.evaluacion = {
+            nivelRiesgo: String(clasificacion)
+        };
+    }
     if (zona) where.zona = String(zona);
     if (busqueda) {
         where.OR = [
             { descripcion: { contains: String(busqueda), mode: 'insensitive' } },
-            { causaRiesgo: { contains: String(busqueda), mode: 'insensitive' } },
+            { numeroIdentificacion: { contains: String(busqueda), mode: 'insensitive' } },
         ];
     }
 
-    const take = Number(pageSize) || 10;
-    const skip = (Number(page) - 1) * take || 0;
+    // OPTIMIZADO: Paginación robusta con validación
+    const pageNum = Math.max(1, Number(page) || 1); // Mínimo página 1
+    const requestedPageSize = Number(pageSize) || 50;
+    const take = Math.min(Math.max(1, requestedPageSize), 100); // Entre 1 y 100
+    const skip = (pageNum - 1) * take;
 
     try {
         const includeCausasFlag = String(includeCausas) === 'true';
         
-        // Construir include de forma segura - solo relaciones básicas que sabemos que existen
+        // OPTIMIZADO: Include simple - Prisma permite select en el nivel superior
+        // Usar select en el nivel superior para evaluacion y proceso
         const include: any = {
-            evaluacion: true,
-            proceso: true  // Incluir proceso completo sin select específico para evitar errores
+            evaluacion: true, // Incluir toda la evaluación (necesaria para cálculos)
+            proceso: {
+                select: {
+                    id: true,
+                    nombre: true,
+                    sigla: true,
+                }
+            }
         };
         
-        // Incluir causas si se solicita, pero de forma segura
+        // Incluir causas solo si se solicita, limitadas para evitar sobrecarga
+        // OPTIMIZADO: Reducir a 10 causas por riesgo para mejor rendimiento
         if (includeCausasFlag) {
-            include.causas = true;  // Solo incluir causas, sin controles anidados por ahora
+            include.causas = {
+                take: 10, // Limitar causas a 10 por riesgo para máximo rendimiento
+                orderBy: { id: 'asc' } // Ordenar para consistencia
+                // Nota: No usar select dentro de include en Prisma
+            };
+        }
+        
+        // OPTIMIZADO: Ejecutar queries en paralelo para mejor rendimiento
+        // Usar índices en procesoId y createdAt para queries más rápidas
+        // OPTIMIZADO: Ordenamiento simple por createdAt (más rápido y confiable)
+        const orderBy = { createdAt: 'desc' as const };
+        
+        // OPTIMIZADO: Validar que take y skip sean válidos antes de ejecutar
+        if (take <= 0 || take > 100) {
+            return res.status(400).json({ 
+                error: 'Invalid pageSize', 
+                message: 'pageSize must be between 1 and 100' 
+            });
+        }
+        
+        if (skip < 0) {
+            return res.status(400).json({ 
+                error: 'Invalid page', 
+                message: 'page must be >= 1' 
+            });
         }
         
         const [riesgos, total] = await Promise.all([
@@ -43,21 +87,37 @@ export const getRiesgos = async (req: Request, res: Response) => {
                 take,
                 skip,
                 include,
-                orderBy: { createdAt: 'desc' },
+                orderBy, // Ordenamiento simple para mejor rendimiento
             }),
+            // OPTIMIZADO: Count más rápido usando índice
             prisma.riesgo.count({ where })
         ]);
+
+        // Calcular totalPages de forma segura
+        const totalPages = total > 0 ? Math.ceil(total / take) : 0;
 
         res.json({
             data: riesgos,
             total,
-            page: Number(page) || 1,
+            page: pageNum,
             pageSize: take,
-            totalPages: Math.ceil(total / take)
+            totalPages,
+            hasNextPage: pageNum < totalPages,
+            hasPreviousPage: pageNum > 1
         });
-    } catch (error) {
+    } catch (error: any) {
         console.error('[BACKEND] Error in getRiesgos:', error);
-        res.status(500).json({ error: 'Error fetching riesgos' });
+        console.error('[BACKEND] Error stack:', error?.stack);
+        console.error('[BACKEND] Error details:', {
+            message: error?.message,
+            code: error?.code,
+            meta: error?.meta
+        });
+        res.status(500).json({ 
+            error: 'Error fetching riesgos',
+            message: error?.message || 'Unknown error',
+            code: error?.code
+        });
     }
 };
 
@@ -199,26 +259,58 @@ export const updateRiesgo = async (req: Request, res: Response) => {
             }
         });
 
-        // Solo actualizar evaluación si ya existe (no crear nueva)
+        // Actualizar evaluación si se proporciona (crear si no existe)
         if (Object.keys(evaluacionUpdate).length > 0) {
             const existingEval = await prisma.evaluacionRiesgo.findUnique({
                 where: { riesgoId: id }
             });
             if (existingEval) {
+                // Actualizar evaluación existente
+                // NOTA: No establecer updatedAt manualmente, Prisma lo maneja automáticamente con @updatedAt
                 const evaluacionActualizada = await prisma.evaluacionRiesgo.update({
                     where: { riesgoId: id },
-                    data: { ...evaluacionUpdate }
+                    data: { 
+                        ...evaluacionUpdate
+                    }
                 });
-                console.log('[BACKEND] Evaluacion actualizada con valores residuales:', {
+                console.log('[BACKEND] Evaluacion actualizada:', {
                     riesgoId: id,
+                    riesgoInherente: evaluacionActualizada.riesgoInherente,
+                    nivelRiesgo: evaluacionActualizada.nivelRiesgo,
+                    probabilidad: evaluacionActualizada.probabilidad,
+                    impactoGlobal: evaluacionActualizada.impactoGlobal,
                     riesgoResidual: evaluacionActualizada.riesgoResidual,
                     probabilidadResidual: evaluacionActualizada.probabilidadResidual,
                     impactoResidual: evaluacionActualizada.impactoResidual,
                     nivelRiesgoResidual: evaluacionActualizada.nivelRiesgoResidual
                 });
             } else {
-                console.warn('[BACKEND] No se encontró evaluación para riesgo:', id);
+                // Crear nueva evaluación si no existe
+                const nuevaEvaluacion = await prisma.evaluacionRiesgo.create({
+                    data: {
+                        riesgoId: id,
+                        ...evaluacionUpdate
+                    }
+                });
+                console.log('[BACKEND] Nueva evaluación creada:', {
+                    riesgoId: id,
+                    riesgoInherente: nuevaEvaluacion.riesgoInherente,
+                    nivelRiesgo: nuevaEvaluacion.nivelRiesgo,
+                    probabilidad: nuevaEvaluacion.probabilidad,
+                    impactoGlobal: nuevaEvaluacion.impactoGlobal
+                });
             }
+        }
+
+        // Si se actualizaron los impactos, recalcular automáticamente riesgoInherente desde causas
+        const camposImpacto = ['impactoPersonas', 'impactoLegal', 'impactoAmbiental', 'impactoProcesos', 
+                               'impactoReputacion', 'impactoEconomico', 'confidencialidadSGSI', 
+                               'disponibilidadSGSI', 'integridadSGSI'];
+        const seActualizaronImpactos = evaluacionUpdate && camposImpacto.some(campo => evaluacionUpdate[campo] !== undefined);
+        
+        if (seActualizaronImpactos) {
+            console.log(`[BACKEND] Se actualizaron impactos para riesgo ${id}, recalculando automáticamente...`);
+            await recalcularRiesgoInherenteDesdeCausas(id);
         }
 
         res.json(updated);
@@ -351,7 +443,8 @@ export const getPuntosMapa = async (req: Request, res: Response) => {
                 let probabilidad: number;
                 let impacto: number;
                 
-                // Calcular probabilidad e impacto desde riesgoInherente o valores directos
+                // SIEMPRE calcular probabilidad e impacto desde riesgoInherente para garantizar consistencia
+                // Ignorar valores guardados en probabilidad e impactoGlobal si hay riesgoInherente
                 const riesgoInherente = r.evaluacion!.riesgoInherente;
                 if (riesgoInherente && riesgoInherente > 0 && !isNaN(riesgoInherente)) {
                     // Convertir riesgoInherente a probabilidad e impacto
@@ -361,17 +454,35 @@ export const getPuntosMapa = async (req: Request, res: Response) => {
                     let encontradoExacto = false;
                     
                     // Primero buscar coincidencia exacta
-                    for (let prob = 1; prob <= 5; prob++) {
-                        for (let imp = 1; imp <= 5; imp++) {
-                            const valor = prob === 2 && imp === 2 ? 3.99 : prob * imp;
-                            if (Math.abs(valor - riesgoInherente) < 0.01) {
-                                mejorProb = prob;
-                                mejorImp = imp;
-                                encontradoExacto = true;
-                                break;
-                            }
+                    // IMPORTANTE: Priorizar combinaciones balanceadas (prob == imp)
+                    // Para riesgoInherente = 16, preferir 4×4 sobre otras combinaciones
+                    // Para riesgoInherente = 4, preferir 2×2 sobre 1×4 o 4×1
+                    // Buscar primero combinaciones balanceadas (prob == imp), luego otras
+                    for (let prob = 5; prob >= 1; prob--) {
+                        const imp = prob;
+                        const valor = prob === 2 && imp === 2 ? 3.99 : prob * imp;
+                        if (Math.abs(valor - riesgoInherente) < 0.01) {
+                            mejorProb = prob;
+                            mejorImp = imp;
+                            encontradoExacto = true;
+                            break;
                         }
-                        if (encontradoExacto) break;
+                    }
+                    
+                    // Si no encontramos balanceada, buscar cualquier coincidencia exacta
+                    if (!encontradoExacto) {
+                        for (let imp = 5; imp >= 1; imp--) {
+                            for (let prob = 1; prob <= 5; prob++) {
+                                const valor = prob === 2 && imp === 2 ? 3.99 : prob * imp;
+                                if (Math.abs(valor - riesgoInherente) < 0.01) {
+                                    mejorProb = prob;
+                                    mejorImp = imp;
+                                    encontradoExacto = true;
+                                    break;
+                                }
+                            }
+                            if (encontradoExacto) break;
+                        }
                     }
                     
                     // Si no hay coincidencia exacta, buscar el más cercano >= riesgoInherente
@@ -412,6 +523,21 @@ export const getPuntosMapa = async (req: Request, res: Response) => {
                     
                     probabilidad = mejorProb;
                     impacto = mejorImp;
+                    
+                    // Log para debugging: verificar si hay inconsistencia con valores guardados
+                    const probGuardada = Number(r.evaluacion!.probabilidad);
+                    const impGuardado = Number(r.evaluacion!.impactoGlobal);
+                    if ((probGuardada && Math.abs(probGuardada - probabilidad) > 0.1) || 
+                        (impGuardado && Math.abs(impGuardado - impacto) > 0.1)) {
+                        console.log(`[BACKEND] ⚠️ Riesgo ${r.id}: Inconsistencia detectada. ` +
+                            `riesgoInherente=${riesgoInherente} -> Calculado: Prob=${probabilidad}, Imp=${impacto} ` +
+                            `vs Guardado: Prob=${probGuardada}, Imp=${impGuardado}`);
+                    }
+                    
+                    // Log siempre para debugging
+                    console.log(`[BACKEND] Riesgo ${r.id} (${r.numeroIdentificacion || r.id}): ` +
+                        `riesgoInherente=${riesgoInherente} -> Prob=${probabilidad}, Imp=${impacto} ` +
+                        `(verificación: ${probabilidad}×${impacto}=${probabilidad === 2 && impacto === 2 ? 3.99 : probabilidad * impacto})`);
                 } else {
                     // Fallback: usar probabilidad e impactoGlobal directamente, o valores por defecto
                     const probEval = Number(r.evaluacion!.probabilidad);
@@ -567,6 +693,187 @@ export const getCausas = async (req: Request, res: Response) => {
     }
 };
 
+/**
+ * Función helper para recalcular automáticamente riesgoInherente, probabilidad e impactoGlobal
+ * cuando se crea, actualiza o elimina una causa
+ */
+async function recalcularRiesgoInherenteDesdeCausas(riesgoId: number): Promise<void> {
+    try {
+        // Obtener el riesgo con su evaluación y causas
+        const riesgo = await prisma.riesgo.findUnique({
+            where: { id: riesgoId },
+            include: {
+                evaluacion: true,
+                causas: true
+            }
+        });
+
+        if (!riesgo || !riesgo.evaluacion) {
+            console.log(`[BACKEND] ⚠️ Riesgo ${riesgoId} no tiene evaluación, saltando recálculo`);
+            return;
+        }
+
+        // Si no hay causas, establecer a 0
+        if (!riesgo.causas || riesgo.causas.length === 0) {
+            await prisma.evaluacionRiesgo.update({
+                where: { riesgoId },
+                data: {
+                    riesgoInherente: 0,
+                    nivelRiesgo: 'Sin Calificar',
+                    probabilidad: 1,
+                    impactoGlobal: 1
+                }
+            });
+            console.log(`[BACKEND] Riesgo ${riesgoId}: Sin causas, establecido a 0`);
+            return;
+        }
+
+        // Calcular calificación global impacto desde campos individuales
+        const calificacionGlobalImpacto = Math.round(
+            (Number(riesgo.evaluacion.impactoPersonas || 1) * 0.10) +
+            (Number(riesgo.evaluacion.impactoLegal || 1) * 0.22) +
+            (Number(riesgo.evaluacion.impactoAmbiental || 1) * 0.10) +
+            (Number(riesgo.evaluacion.impactoProcesos || 1) * 0.14) +
+            (Number(riesgo.evaluacion.impactoReputacion || 1) * 0.22) +
+            (Number(riesgo.evaluacion.impactoEconomico || 1) * 0.22)
+        );
+
+        // Obtener todas las frecuencias del catálogo
+        const frecuenciasCatalog = await prisma.frecuenciaCatalog.findMany();
+
+        // Calcular calificación inherente por cada causa
+        const calificacionesInherentes: number[] = [];
+        for (const causa of riesgo.causas) {
+            // Obtener peso de frecuencia
+            let pesoFrecuencia = 3; // Default
+            if (causa.frecuencia) {
+                // Intentar buscar por ID
+                if (/^\d+$/.test(causa.frecuencia)) {
+                    const freqId = parseInt(causa.frecuencia);
+                    const freqCatalog = frecuenciasCatalog.find(f => f.id === freqId);
+                    pesoFrecuencia = freqCatalog?.peso || freqId;
+                } else {
+                    // Buscar por label
+                    const freqCatalog = frecuenciasCatalog.find(f => 
+                        f.label?.toLowerCase() === causa.frecuencia.toLowerCase()
+                    );
+                    pesoFrecuencia = freqCatalog?.peso || 3;
+                }
+            }
+
+            // Calcular calificación inherente por causa (aplicar excepción 2x2=3.99)
+            let calificacionInherentePorCausa: number;
+            if (pesoFrecuencia === 2 && calificacionGlobalImpacto === 2) {
+                calificacionInherentePorCausa = 3.99;
+            } else {
+                calificacionInherentePorCausa = calificacionGlobalImpacto * pesoFrecuencia;
+            }
+
+            calificacionesInherentes.push(calificacionInherentePorCausa);
+        }
+
+        // Calcular máximo de todas las causas
+        const maxCalificacionInherente = calificacionesInherentes.length > 0
+            ? Math.max(...calificacionesInherentes)
+            : 0;
+
+        // Determinar nivel de riesgo (simplificado - usar rangos estándar)
+        let nivelRiesgo = 'Sin Calificar';
+        if (maxCalificacionInherente >= 15 && maxCalificacionInherente <= 25) {
+            nivelRiesgo = 'Crítico';
+        } else if (maxCalificacionInherente >= 10 && maxCalificacionInherente <= 14) {
+            nivelRiesgo = 'Alto';
+        } else if (maxCalificacionInherente >= 4 && maxCalificacionInherente <= 9) {
+            nivelRiesgo = 'Medio';
+        } else if ((maxCalificacionInherente >= 1 && maxCalificacionInherente <= 3) || maxCalificacionInherente === 3.99) {
+            nivelRiesgo = 'Bajo';
+        }
+
+        // Convertir riesgoInherente a probabilidad e impacto (priorizando combinaciones balanceadas)
+        let mejorProb = 1;
+        let mejorImp = 1;
+        let encontradoExacto = false;
+
+        // Primero buscar combinaciones balanceadas (prob == imp)
+        for (let prob = 5; prob >= 1; prob--) {
+            const imp = prob;
+            const valor = prob === 2 && imp === 2 ? 3.99 : prob * imp;
+            if (Math.abs(valor - maxCalificacionInherente) < 0.01) {
+                mejorProb = prob;
+                mejorImp = imp;
+                encontradoExacto = true;
+                break;
+            }
+        }
+
+        // Si no encontramos balanceada, buscar cualquier coincidencia exacta
+        if (!encontradoExacto) {
+            for (let imp = 5; imp >= 1; imp--) {
+                for (let prob = 1; prob <= 5; prob++) {
+                    const valor = prob === 2 && imp === 2 ? 3.99 : prob * imp;
+                    if (Math.abs(valor - maxCalificacionInherente) < 0.01) {
+                        mejorProb = prob;
+                        mejorImp = imp;
+                        encontradoExacto = true;
+                        break;
+                    }
+                }
+                if (encontradoExacto) break;
+            }
+        }
+
+        // Si no hay coincidencia exacta, buscar el más cercano >=
+        if (!encontradoExacto) {
+            let menorDiferencia = Infinity;
+            for (let prob = 1; prob <= 5; prob++) {
+                for (let imp = 1; imp <= 5; imp++) {
+                    const valor = prob === 2 && imp === 2 ? 3.99 : prob * imp;
+                    if (valor >= maxCalificacionInherente) {
+                        const diferencia = valor - maxCalificacionInherente;
+                        if (diferencia < menorDiferencia) {
+                            menorDiferencia = diferencia;
+                            mejorProb = prob;
+                            mejorImp = imp;
+                        }
+                    }
+                }
+            }
+
+            // Si aún no hay valor >=, usar el más cercano
+            if (menorDiferencia === Infinity) {
+                menorDiferencia = Infinity;
+                for (let prob = 1; prob <= 5; prob++) {
+                    for (let imp = 1; imp <= 5; imp++) {
+                        const valor = prob === 2 && imp === 2 ? 3.99 : prob * imp;
+                        const diferencia = Math.abs(maxCalificacionInherente - valor);
+                        if (diferencia < menorDiferencia) {
+                            menorDiferencia = diferencia;
+                            mejorProb = prob;
+                            mejorImp = imp;
+                        }
+                    }
+                }
+            }
+        }
+
+        // Actualizar evaluación
+        await prisma.evaluacionRiesgo.update({
+            where: { riesgoId },
+            data: {
+                riesgoInherente: Math.round(maxCalificacionInherente),
+                nivelRiesgo,
+                probabilidad: mejorProb,
+                impactoGlobal: mejorImp
+            }
+        });
+
+        console.log(`[BACKEND] ✅ Riesgo ${riesgoId}: Recalculado automáticamente - riesgoInherente=${Math.round(maxCalificacionInherente)}, Prob=${mejorProb}, Imp=${mejorImp}, Nivel=${nivelRiesgo}`);
+    } catch (error) {
+        console.error(`[BACKEND] ❌ Error al recalcular riesgo ${riesgoId} desde causas:`, error);
+        // No lanzar error para no interrumpir la operación principal
+    }
+}
+
 export const createCausa = async (req: Request, res: Response) => {
     console.log('[BACKEND] createCausa', req.body);
     try {
@@ -589,6 +896,10 @@ export const createCausa = async (req: Request, res: Response) => {
         });
         
         console.log('[BACKEND] Causa creada:', causa.id);
+        
+        // Recalcular automáticamente riesgoInherente, probabilidad e impactoGlobal
+        await recalcularRiesgoInherenteDesdeCausas(Number(riesgoId));
+        
         res.status(201).json(causa);
     } catch (error) {
         console.error('[BACKEND] Error in createCausa:', error);
@@ -622,6 +933,13 @@ export const updateCausa = async (req: Request, res: Response) => {
             data: updateData
         });
         console.log('[BACKEND] Causa actualizada:', updated.id);
+        
+        // Recalcular automáticamente riesgoInherente, probabilidad e impactoGlobal
+        // Solo si se modificó frecuencia o si puede afectar el cálculo
+        if (frecuencia !== undefined || descripcion !== undefined) {
+            await recalcularRiesgoInherenteDesdeCausas(updated.riesgoId);
+        }
+        
         res.json(updated);
     } catch (error) {
         console.error('[BACKEND] Error in updateCausa:', error);
@@ -643,10 +961,16 @@ export const deleteCausa = async (req: Request, res: Response) => {
             return res.status(404).json({ error: `Causa con id ${id} no encontrada` });
         }
         
+        const riesgoId = causa.riesgoId;
+        
         await prisma.causaRiesgo.delete({
             where: { id }
         });
         console.log('[BACKEND] Causa eliminada exitosamente:', id);
+        
+        // Recalcular automáticamente riesgoInherente, probabilidad e impactoGlobal
+        await recalcularRiesgoInherenteDesdeCausas(riesgoId);
+        
         res.json({ message: 'Causa eliminada correctamente', id });
     } catch (error: any) {
         console.error('[BACKEND] Error in deleteCausa:', error);
