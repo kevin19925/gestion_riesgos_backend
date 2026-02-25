@@ -1,0 +1,51 @@
+# Backend Gestión de Riesgos
+# Uso: docker compose up -d --build
+# Variables: DATABASE_URL (obligatorio), REDIS_URL (opcional), PORT (opcional, default 8080)
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: gestion-riesgos-backend
+    restart: unless-stopped
+    ports:
+      - "${PORT:-8080}:8080"
+    environment:
+      - NODE_ENV=production
+      - PORT=8080
+      - DATABASE_URL=${DATABASE_URL}
+      - REDIS_URL=${REDIS_URL:-}
+    # Crea .env en el servidor con DATABASE_URL (y opcional REDIS_URL, PORT) o pásalas al host
+    # Si usas Postgres y Redis en el mismo compose, descomenta depends_on y las variables de abajo
+    # depends_on:
+    #   - db
+    #   - redis
+    # environment:
+    #   - DATABASE_URL=postgresql://postgres:postgres@db:5432/gestion_riesgos
+    #   - REDIS_URL=redis://redis:6379
+
+  # Opcional: Postgres local (solo si no tienes DATABASE_URL externo)
+  # db:
+  #   image: postgres:15-alpine
+  #   container_name: gestion-riesgos-db
+  #   restart: unless-stopped
+  #   environment:
+  #     POSTGRES_USER: postgres
+  #     POSTGRES_PASSWORD: postgres
+  #     POSTGRES_DB: gestion_riesgos
+  #   volumes:
+  #     - postgres_data:/var/lib/postgresql/data
+  #   ports:
+  #     - "5432:5432"
+
+  # Opcional: Redis local (solo si quieres caché y no tienes REDIS_URL externo)
+  # redis:
+  #   image: redis:7-alpine
+  #   container_name: gestion-riesgos-redis
+  #   restart: unless-stopped
+  #   ports:
+  #     - "6379:6379"
+
+# volumes:
+#   postgres_data:
