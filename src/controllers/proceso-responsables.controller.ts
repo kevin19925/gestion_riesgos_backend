@@ -169,9 +169,6 @@ export const updateResponsablesProceso = async (req: Request, res: Response) => 
         const procesoId = Number(req.params.procesoId);
         const { responsables, responsablesIds } = req.body;
         
-        console.log('[BACKEND] updateResponsablesProceso - procesoId:', procesoId);
-        console.log('[BACKEND] updateResponsablesProceso - body:', JSON.stringify(req.body, null, 2));
-        
         // Verificar que el proceso existe
         const proceso = await prisma.proceso.findUnique({
             where: { id: procesoId }
@@ -188,7 +185,7 @@ export const updateResponsablesProceso = async (req: Request, res: Response) => 
             // Nuevo formato: [{ usuarioId, modo }]
             responsablesData = responsables.map((r: any) => ({
                 usuarioId: Number(r.usuarioId),
-                modo: r.modo && ['dueño', 'supervisor'].includes(r.modo) ? r.modo : (r.modo === null ? null : undefined)
+                modo: r.modo && ['dueño', 'supervisor', 'ambos'].includes(r.modo) ? r.modo : (r.modo === null ? null : undefined)
             }));
         } else if (Array.isArray(responsablesIds)) {
             // Formato antiguo: solo IDs
@@ -197,37 +194,26 @@ export const updateResponsablesProceso = async (req: Request, res: Response) => 
                 modo: null
             }));
         } else {
-            console.error('[BACKEND] updateResponsablesProceso - Error: No se proporcionó "responsables" ni "responsablesIds"');
             return res.status(400).json({ error: 'Debe proporcionar "responsables" o "responsablesIds"' });
         }
-        
-        console.log('[BACKEND] updateResponsablesProceso - responsablesData procesados:', JSON.stringify(responsablesData, null, 2));
         
         // Verificar que todos los usuarios existen y obtener sus roles
         const usuariosIds = responsablesData.map(r => r.usuarioId);
         // Usar Set para obtener IDs únicos (un usuario puede aparecer múltiples veces con diferentes modos)
         const usuariosIdsUnicos = Array.from(new Set(usuariosIds));
-        console.log('[BACKEND] updateResponsablesProceso - Buscando usuarios con IDs:', usuariosIds);
-        console.log('[BACKEND] updateResponsablesProceso - IDs únicos:', usuariosIdsUnicos);
         
         const usuarios = await prisma.usuario.findMany({
             where: { id: { in: usuariosIdsUnicos } },
             include: { role: true }
         });
         
-        console.log('[BACKEND] updateResponsablesProceso - Usuarios encontrados:', usuarios.length);
-        console.log('[BACKEND] updateResponsablesProceso - Usuarios:', JSON.stringify(usuarios.map(u => ({ id: u.id, nombre: u.nombre, roleId: u.roleId, role: u.role })), null, 2));
-        
         // Validar que todos los IDs únicos existen
         if (usuarios.length !== usuariosIdsUnicos.length) {
             const usuariosEncontradosIds = usuarios.map(u => u.id);
             const usuariosFaltantes = usuariosIdsUnicos.filter(id => !usuariosEncontradosIds.includes(id));
-            console.error('[BACKEND] updateResponsablesProceso - Usuarios faltantes:', usuariosFaltantes);
             return res.status(400).json({ 
                 error: 'Uno o más usuarios no existen',
-                usuariosFaltantes: usuariosFaltantes,
-                usuariosEnviados: usuariosIdsUnicos,
-                usuariosEncontrados: usuariosEncontradosIds
+                usuariosFaltantes: usuariosFaltantes
             });
         }
         
@@ -240,7 +226,6 @@ export const updateResponsablesProceso = async (req: Request, res: Response) => 
                 // Si es gerente y tiene modo "ambos", mantenerlo
                 // Si no tiene modo o es inválido, usar 'ambos' por defecto
                 if (!responsableData.modo || !['dueño', 'supervisor', 'ambos'].includes(responsableData.modo)) {
-                    console.log(`[BACKEND] Gerente ${usuario?.nombre} sin modo válido, asignando 'ambos' por defecto`);
                     responsableData.modo = 'ambos';
                 }
             } else {
@@ -248,8 +233,6 @@ export const updateResponsablesProceso = async (req: Request, res: Response) => 
                 responsableData.modo = null;
             }
         }
-        
-        console.log('[BACKEND] updateResponsablesProceso - responsablesData después de validación:', JSON.stringify(responsablesData, null, 2));
         
         // Eliminar todos los responsables actuales y crear los nuevos
         await prisma.$transaction([
@@ -287,7 +270,7 @@ export const updateResponsablesProceso = async (req: Request, res: Response) => 
             id: r.id,
             procesoId: r.procesoId,
             usuario: r.usuario,
-            modo: (r as any).modo || null, // Usar 'as any' temporalmente hasta que se agregue el campo a la BD
+            modo: (r as any).modo || null,
             createdAt: r.createdAt
         })));
     } catch (error) {
