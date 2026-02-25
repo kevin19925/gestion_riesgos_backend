@@ -1,7 +1,7 @@
 name: Deploy Empresa
 on:
   push:
-    branches: [ main ] # Se dispara cuando subes cambios a la rama main
+    branches: [ main ]
 
 jobs:
   deploy:
@@ -17,12 +17,27 @@ jobs:
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
+            # 1. Crear carpeta si no existe y entrar
             mkdir -p ~/app-empresa
             cd ~/app-empresa
-            # Si el repo no existe, lo clona. Si existe, lo actualiza.
+
+            # 2. Configurar Git para que confíe en la carpeta (evita errores de permisos)
+            git config --global --add safe.directory /home/${{ secrets.SSH_USER }}/app-empresa
+
+            # 3. Actualizar el código de forma forzada
             if [ ! -d ".git" ]; then
               git clone https://github.com/${{ github.repository }}.git .
             else
-              git pull origin main
+              git fetch origin main
+              git reset --hard origin/main
             fi
-            docker compose up -d --build
+
+            # 4. Inyectar el archivo .env desde los Secrets de GitHub
+            # Asegúrate de haber creado el secret "DOTENV_FILE" en GitHub
+            echo "${{ secrets.DOTENV_FILE }}" > .env
+
+            # 5. Levantar el servicio (Prueba ambos comandos por si la versión de Docker varía)
+            docker compose up -d --build || docker-compose up -d --build
+            
+            # 6. Limpieza de imágenes huérfanas para no llenar el disco de la VM
+            docker image prune -f
