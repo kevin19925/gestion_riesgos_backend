@@ -958,7 +958,7 @@ export const updateCausa = async (req: Request, res: Response) => {
         if (tipoGestion !== undefined) updateData.tipoGestion = tipoGestion;
         if (gestion !== undefined) updateData.gestion = gestion;
         
-        // Campos básicos de causa (nuevos)
+        // Campos básicos de causa
         if (descripcion !== undefined) updateData.descripcion = descripcion;
         if (fuenteCausa !== undefined) updateData.fuenteCausa = fuenteCausa;
         if (frecuencia !== undefined) updateData.frecuencia = frecuencia ? String(frecuencia) : null;
