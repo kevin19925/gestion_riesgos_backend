@@ -193,6 +193,8 @@ model Riesgo {
   tipoRiesgoRelacion          TipoRiesgo?           @relation(fields: [tipoRiesgoId], references: [id])
 
   @@unique([procesoId, numero])
+  @@index([procesoId])
+  @@index([createdAt])
 }
 
 model CausaRiesgo {
@@ -207,6 +209,8 @@ model CausaRiesgo {
   gestion      Json?
   riesgo       Riesgo          @relation(fields: [riesgoId], references: [id], onDelete: Cascade)
   controles    ControlRiesgo[]
+
+  @@index([riesgoId])
 }
 
 model ControlRiesgo {
@@ -330,6 +334,10 @@ model Incidencia {
   responsable             Usuario?     @relation(fields: [responsableId], references: [id])
   riesgo                  Riesgo?      @relation(fields: [riesgoId], references: [id])
   planesAccion            PlanAccion[]
+
+  @@index([procesoId])
+  @@index([riesgoId])
+  @@index([fechaOcurrencia])
 }
 
 model TipoRiesgo {
