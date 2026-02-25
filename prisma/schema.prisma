@@ -107,14 +107,15 @@ model ProcesoResponsable {
   id        Int      @id @default(autoincrement())
   procesoId Int
   usuarioId Int
-  modo      String?  @db.VarChar(20) // 'dueño' o 'supervisor' - solo para gerentes
   createdAt DateTime @default(now())
+  modo      String?  @db.VarChar(20)
   proceso   Proceso  @relation(fields: [procesoId], references: [id], onDelete: Cascade)
   usuario   Usuario  @relation("ProcesoResponsables", fields: [usuarioId], references: [id], onDelete: Cascade)
 
   @@unique([procesoId, usuarioId])
   @@index([procesoId])
   @@index([usuarioId])
+  @@index([modo])
 }
 
 model DofaItem {
