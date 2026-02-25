@@ -1,5 +1,5 @@
 # Backend Gestión de Riesgos - Node 18 + Prisma
-FROM node:18-alpine AS builder
+FROM node:20-alpine AS builder
 
 WORKDIR /app
 
