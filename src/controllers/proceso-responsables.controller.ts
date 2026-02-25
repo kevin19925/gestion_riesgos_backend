@@ -56,8 +56,8 @@ export const addResponsableToProceso = async (req: Request, res: Response) => {
         }
         
         // Validar modo si se proporciona
-        if (modo && !['dueño', 'supervisor'].includes(modo)) {
-            return res.status(400).json({ error: 'modo debe ser "dueño" o "supervisor"' });
+        if (modo && !['dueño', 'supervisor', 'ambos'].includes(modo)) {
+            return res.status(400).json({ error: 'modo debe ser "dueño", "supervisor" o "ambos"' });
         }
         
         // Verificar que el proceso existe
@@ -205,13 +205,30 @@ export const updateResponsablesProceso = async (req: Request, res: Response) => 
         
         // Verificar que todos los usuarios existen y obtener sus roles
         const usuariosIds = responsablesData.map(r => r.usuarioId);
+        // Usar Set para obtener IDs únicos (un usuario puede aparecer múltiples veces con diferentes modos)
+        const usuariosIdsUnicos = Array.from(new Set(usuariosIds));
+        console.log('[BACKEND] updateResponsablesProceso - Buscando usuarios con IDs:', usuariosIds);
+        console.log('[BACKEND] updateResponsablesProceso - IDs únicos:', usuariosIdsUnicos);
+        
         const usuarios = await prisma.usuario.findMany({
-            where: { id: { in: usuariosIds } },
+            where: { id: { in: usuariosIdsUnicos } },
             include: { role: true }
         });
         
-        if (usuarios.length !== usuariosIds.length) {
-            return res.status(400).json({ error: 'Uno o más usuarios no existen' });
+        console.log('[BACKEND] updateResponsablesProceso - Usuarios encontrados:', usuarios.length);
+        console.log('[BACKEND] updateResponsablesProceso - Usuarios:', JSON.stringify(usuarios.map(u => ({ id: u.id, nombre: u.nombre, roleId: u.roleId, role: u.role })), null, 2));
+        
+        // Validar que todos los IDs únicos existen
+        if (usuarios.length !== usuariosIdsUnicos.length) {
+            const usuariosEncontradosIds = usuarios.map(u => u.id);
+            const usuariosFaltantes = usuariosIdsUnicos.filter(id => !usuariosEncontradosIds.includes(id));
+            console.error('[BACKEND] updateResponsablesProceso - Usuarios faltantes:', usuariosFaltantes);
+            return res.status(400).json({ 
+                error: 'Uno o más usuarios no existen',
+                usuariosFaltantes: usuariosFaltantes,
+                usuariosEnviados: usuariosIdsUnicos,
+                usuariosEncontrados: usuariosEncontradosIds
+            });
         }
         
         // Validar y normalizar los modos
@@ -220,11 +237,11 @@ export const updateResponsablesProceso = async (req: Request, res: Response) => 
             const esGerente = usuario?.role?.codigo === 'gerente';
             
             if (esGerente) {
-                // Si es gerente, debe tener un modo válido
-                if (!responsableData.modo || !['dueño', 'supervisor'].includes(responsableData.modo)) {
-                    // Si no tiene modo o es inválido, usar 'dueño' por defecto
-                    console.log(`[BACKEND] Gerente ${usuario?.nombre} sin modo válido, asignando 'dueño' por defecto`);
-                    responsableData.modo = 'dueño';
+                // Si es gerente y tiene modo "ambos", mantenerlo
+                // Si no tiene modo o es inválido, usar 'ambos' por defecto
+                if (!responsableData.modo || !['dueño', 'supervisor', 'ambos'].includes(responsableData.modo)) {
+                    console.log(`[BACKEND] Gerente ${usuario?.nombre} sin modo válido, asignando 'ambos' por defecto`);
+                    responsableData.modo = 'ambos';
                 }
             } else {
                 // Si no es gerente, modo debe ser null
