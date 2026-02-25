@@ -3,13 +3,11 @@ FROM node:20-alpine AS builder
 
 WORKDIR /app
 
+# Copiar todo antes de npm ci: el postinstall ejecuta "prisma generate && tsc" y necesita prisma/ y src/
 COPY package.json package-lock.json* ./
-RUN npm ci
-
 COPY prisma ./prisma/
-RUN npx prisma generate
-
 COPY . .
+RUN npm ci
 RUN npm run build
 
 # Imagen final
