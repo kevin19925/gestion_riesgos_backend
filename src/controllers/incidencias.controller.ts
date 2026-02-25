@@ -1,10 +1,13 @@
 import { Request, Response } from 'express';
 import prisma from '../prisma';
+import { redisGet, redisSet } from '../redisClient';
 
 /**
  * INCIDENCIAS/EVENTOS CONTROLLER
  * Gestiona incidencias (materialización de riesgos)
  */
+
+const INCIDENCIAS_MAX = 200;
 
 export const getIncidencias = async (req: Request, res: Response) => {
   try {
@@ -13,15 +16,37 @@ export const getIncidencias = async (req: Request, res: Response) => {
     if (procesoId) where.procesoId = Number(procesoId);
     if (riesgoId) where.riesgoId = Number(riesgoId);
 
+    const cacheKeyBase = procesoId
+      ? `incidencias:proceso:${procesoId}`
+      : riesgoId
+        ? `incidencias:riesgo:${riesgoId}`
+        : null;
+
+    if (cacheKeyBase) {
+      const cached = await redisGet<any[]>(cacheKeyBase);
+      if (cached) {
+        if (process.env.NODE_ENV === 'development') {
+          console.log('[BACKEND][CACHE] getIncidencias HIT', cacheKeyBase);
+        }
+        return res.json(cached);
+      }
+    }
+
     const incidencias = await prisma.incidencia.findMany({
       where,
+      take: INCIDENCIAS_MAX,
       orderBy: { fechaOcurrencia: 'desc' },
       include: {
-        riesgo: true,
-        proceso: true,
-        responsable: true
+        riesgo: { select: { id: true, descripcion: true, numeroIdentificacion: true, procesoId: true } },
+        proceso: { select: { id: true, nombre: true, sigla: true } },
+        responsable: { select: { id: true, nombre: true, email: true } }
       }
     });
+
+    if (cacheKeyBase) {
+      // TTL corto (60s) para evitar datos viejos
+      await redisSet(cacheKeyBase, incidencias, 60);
+    }
 
     res.json(incidencias);
   } catch (error) {

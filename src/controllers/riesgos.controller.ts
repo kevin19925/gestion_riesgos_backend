@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import prisma from '../prisma';
+import { redisGet, redisSet } from '../redisClient';
 
 export const getRiesgos = async (req: Request, res: Response) => {
     const { procesoId, clasificacion, busqueda, page, pageSize, zona, includeCausas } = req.query;
@@ -36,8 +37,23 @@ export const getRiesgos = async (req: Request, res: Response) => {
     const skip = (pageNum - 1) * take;
 
     try {
+        // Caché en Redis para listados pesados (por proceso/página)
         const includeCausasFlag = String(includeCausas) === 'true';
-        
+        const cacheKey =
+            procesoId
+                ? `riesgos:proceso:${procesoId}:page:${pageNum}:size:${take}:causas:${includeCausasFlag}`
+                : null;
+
+        if (cacheKey) {
+            const cached = await redisGet<any>(cacheKey);
+            if (cached) {
+                if (process.env.NODE_ENV === 'development') {
+                    console.log('[BACKEND][CACHE] getRiesgos HIT', cacheKey);
+                }
+                return res.json(cached);
+            }
+        }
+
         // OPTIMIZADO: Include simple - Prisma permite select en el nivel superior
         // Usar select en el nivel superior para evaluacion y proceso
         const include: any = {
@@ -80,7 +96,7 @@ export const getRiesgos = async (req: Request, res: Response) => {
                 message: 'page must be >= 1' 
             });
         }
-        
+
         const [riesgos, total] = await Promise.all([
             prisma.riesgo.findMany({
                 where,
@@ -96,7 +112,7 @@ export const getRiesgos = async (req: Request, res: Response) => {
         // Calcular totalPages de forma segura
         const totalPages = total > 0 ? Math.ceil(total / take) : 0;
 
-        res.json({
+        const payload = {
             data: riesgos,
             total,
             page: pageNum,
@@ -104,7 +120,14 @@ export const getRiesgos = async (req: Request, res: Response) => {
             totalPages,
             hasNextPage: pageNum < totalPages,
             hasPreviousPage: pageNum > 1
-        });
+        };
+
+        if (cacheKey) {
+            // TTL corto (60s) para evitar datos viejos y no depender de invalidación compleja
+            await redisSet(cacheKey, payload, 60);
+        }
+
+        res.json(payload);
     } catch (error: any) {
         console.error('[BACKEND] Error in getRiesgos:', error);
         console.error('[BACKEND] Error stack:', error?.stack);
@@ -407,17 +430,19 @@ export const getPuntosMapa = async (req: Request, res: Response) => {
     // Si no hay procesoId o es 'all', where estará vacío y se obtendrán TODOS los riesgos
 
     try {
-        // Incluir TODAS las causas para calcular correctamente los valores residuales
+        // Límite cuando no hay filtro por proceso para no devolver miles de registros
+        const takeMapa = Object.keys(where).length > 0 ? undefined : 500;
         const riesgos = await prisma.riesgo.findMany({
             where,
-            include: { 
-                evaluacion: true, 
-                proceso: true,
-                causas: true  // Incluir TODAS las causas, no solo las con controles
+            ...(takeMapa ? { take: takeMapa } : {}),
+            include: {
+                evaluacion: true,
+                proceso: { select: { id: true, nombre: true, sigla: true } }
             }
         });
-        
-        console.log(`[BACKEND] getPuntosMapa - ${riesgos.length} riesgos encontrados`);
+        if (process.env.NODE_ENV === 'development') {
+            console.log(`[BACKEND] getPuntosMapa - ${riesgos.length} riesgos`);
+        }
 
         // Incluir TODOS los riesgos con evaluación (no filtrar por valores específicos)
         // IMPORTANTE: Solo generar UN punto por riesgo (evitar duplicados)
@@ -442,22 +467,25 @@ export const getPuntosMapa = async (req: Request, res: Response) => {
             .map(r => {
                 let probabilidad: number;
                 let impacto: number;
-                
-                // SIEMPRE calcular probabilidad e impacto desde riesgoInherente para garantizar consistencia
-                // Ignorar valores guardados en probabilidad e impactoGlobal si hay riesgoInherente
+
                 const riesgoInherente = r.evaluacion!.riesgoInherente;
-                if (riesgoInherente && riesgoInherente > 0 && !isNaN(riesgoInherente)) {
-                    // Convertir riesgoInherente a probabilidad e impacto
-                    // Primero buscar coincidencia exacta, luego el más cercano >=
+                const probGuardada = Number(r.evaluacion!.probabilidad);
+                const impGuardado = Number(r.evaluacion!.impactoGlobal);
+                const tieneEjesGuardados = !isNaN(probGuardada) && probGuardada >= 1 && probGuardada <= 5 &&
+                    !isNaN(impGuardado) && impGuardado >= 1 && impGuardado <= 5;
+
+                // Prioridad 1: Usar probabilidad e impacto guardados cuando son válidos (1-5).
+                // Representan los ejes reales del mapa: X = Frecuencia (probabilidad), Y = Impacto.
+                if (riesgoInherente && riesgoInherente > 0 && !isNaN(riesgoInherente) && tieneEjesGuardados) {
+                    probabilidad = Math.round(probGuardada);
+                    impacto = Math.round(impGuardado);
+                    console.log(`[BACKEND] Riesgo ${r.id} (${r.numeroIdentificacion || r.id}): ` +
+                        `usando ejes guardados -> Prob(Frecuencia)=${probabilidad}, Imp(Impacto)=${impacto}`);
+                } else if (riesgoInherente && riesgoInherente > 0 && !isNaN(riesgoInherente)) {
+                    // Fallback: descomponer riesgoInherente en prob×imp (puede intercambiar ejes)
                     let mejorProb = 1;
                     let mejorImp = 1;
                     let encontradoExacto = false;
-                    
-                    // Primero buscar coincidencia exacta
-                    // IMPORTANTE: Priorizar combinaciones balanceadas (prob == imp)
-                    // Para riesgoInherente = 16, preferir 4×4 sobre otras combinaciones
-                    // Para riesgoInherente = 4, preferir 2×2 sobre 1×4 o 4×1
-                    // Buscar primero combinaciones balanceadas (prob == imp), luego otras
                     for (let prob = 5; prob >= 1; prob--) {
                         const imp = prob;
                         const valor = prob === 2 && imp === 2 ? 3.99 : prob * imp;
@@ -468,8 +496,6 @@ export const getPuntosMapa = async (req: Request, res: Response) => {
                             break;
                         }
                     }
-                    
-                    // Si no encontramos balanceada, buscar cualquier coincidencia exacta
                     if (!encontradoExacto) {
                         for (let imp = 5; imp >= 1; imp--) {
                             for (let prob = 1; prob <= 5; prob++) {
@@ -484,15 +510,11 @@ export const getPuntosMapa = async (req: Request, res: Response) => {
                             if (encontradoExacto) break;
                         }
                     }
-                    
-                    // Si no hay coincidencia exacta, buscar el más cercano >= riesgoInherente
                     if (!encontradoExacto) {
                         let menorDiferencia = Infinity;
                         for (let prob = 1; prob <= 5; prob++) {
                             for (let imp = 1; imp <= 5; imp++) {
                                 const valor = prob === 2 && imp === 2 ? 3.99 : prob * imp;
-                                
-                                // Priorizar valores que sean >= riesgoInherente (no menores)
                                 if (valor >= riesgoInherente) {
                                     const diferencia = valor - riesgoInherente;
                                     if (diferencia < menorDiferencia) {
@@ -503,10 +525,7 @@ export const getPuntosMapa = async (req: Request, res: Response) => {
                                 }
                             }
                         }
-                        
-                        // Si aún no hay valor >=, usar el más cercano (menor)
                         if (menorDiferencia === Infinity) {
-                            menorDiferencia = Infinity;
                             for (let prob = 1; prob <= 5; prob++) {
                                 for (let imp = 1; imp <= 5; imp++) {
                                     const valor = prob === 2 && imp === 2 ? 3.99 : prob * imp;
@@ -520,24 +539,10 @@ export const getPuntosMapa = async (req: Request, res: Response) => {
                             }
                         }
                     }
-                    
                     probabilidad = mejorProb;
                     impacto = mejorImp;
-                    
-                    // Log para debugging: verificar si hay inconsistencia con valores guardados
-                    const probGuardada = Number(r.evaluacion!.probabilidad);
-                    const impGuardado = Number(r.evaluacion!.impactoGlobal);
-                    if ((probGuardada && Math.abs(probGuardada - probabilidad) > 0.1) || 
-                        (impGuardado && Math.abs(impGuardado - impacto) > 0.1)) {
-                        console.log(`[BACKEND] ⚠️ Riesgo ${r.id}: Inconsistencia detectada. ` +
-                            `riesgoInherente=${riesgoInherente} -> Calculado: Prob=${probabilidad}, Imp=${impacto} ` +
-                            `vs Guardado: Prob=${probGuardada}, Imp=${impGuardado}`);
-                    }
-                    
-                    // Log siempre para debugging
                     console.log(`[BACKEND] Riesgo ${r.id} (${r.numeroIdentificacion || r.id}): ` +
-                        `riesgoInherente=${riesgoInherente} -> Prob=${probabilidad}, Imp=${impacto} ` +
-                        `(verificación: ${probabilidad}×${impacto}=${probabilidad === 2 && impacto === 2 ? 3.99 : probabilidad * impacto})`);
+                        `riesgoInherente=${riesgoInherente} -> Prob=${probabilidad}, Imp=${impacto} (descomposición)`);
                 } else {
                     // Fallback: usar probabilidad e impactoGlobal directamente, o valores por defecto
                     const probEval = Number(r.evaluacion!.probabilidad);
@@ -776,133 +781,112 @@ export async function recalcularRiesgoInherenteDesdeCausas(riesgoId: number): Pr
         // Obtener todas las frecuencias del catálogo
         const frecuenciasCatalog = await prisma.frecuenciaCatalog.findMany();
 
-        // Calcular calificación inherente por cada causa
-        const calificacionesInherentes: number[] = [];
+        // Traer configuración de Calificación Inherente (Admin) como única fuente de verdad
+        const configInherente = await prisma.calificacionInherenteConfig.findFirst({
+            where: { activa: true },
+            include: {
+                formulaBase: true,
+                excepciones: { where: { activa: true }, orderBy: { prioridad: 'asc' } },
+                rangos: { where: { activo: true }, orderBy: { orden: 'asc' } },
+                reglaAgregacion: true
+            }
+        });
+
+        const formulaBase = configInherente?.formulaBase;
+        const excepciones = configInherente?.excepciones ?? [];
+        const rangos = configInherente?.rangos ?? [];
+        const tipoAgregacion = (configInherente?.reglaAgregacion?.tipoAgregacion ?? 'maximo').toLowerCase();
+
+        // Calcular calificación inherente por cada causa usando la config (fórmula + excepciones)
+        type CausaConEje = { cal: number; frecuenciaEje: number };
+        const causasConEje: CausaConEje[] = [];
         for (const causa of riesgo.causas) {
-            // Obtener peso de frecuencia
-            let pesoFrecuencia = 3; // Default
+            let pesoFrecuencia = 3;
             if (causa.frecuencia) {
-                // Intentar buscar por ID
                 if (/^\d+$/.test(causa.frecuencia)) {
                     const freqId = parseInt(causa.frecuencia);
                     const freqCatalog = frecuenciasCatalog.find(f => f.id === freqId);
-                    pesoFrecuencia = freqCatalog?.peso || freqId;
+                    // Si peso es 3 (default del catálogo), usar id para escala 1-5 y que Prob×Impacto = Riesgo Inherente
+                    const p = freqCatalog?.peso ?? freqId;
+                    pesoFrecuencia = (p != null && p !== 3) ? p : (freqCatalog?.id ?? freqId);
                 } else {
-                    // Buscar por label
-                    const freqCatalog = frecuenciasCatalog.find(f => 
-                        f.label?.toLowerCase() === causa.frecuencia.toLowerCase()
+                    const freqCatalog = frecuenciasCatalog.find(f =>
+                        f.label?.toLowerCase() === (causa.frecuencia as string).toLowerCase()
                     );
-                    pesoFrecuencia = freqCatalog?.peso || 3;
+                    const p = freqCatalog?.peso ?? 3;
+                    pesoFrecuencia = (p != null && p !== 3) ? p : (freqCatalog?.id ?? 3);
                 }
             }
-
-            // Calcular calificación inherente por causa (aplicar excepción 2x2=3.99)
-            let calificacionInherentePorCausa: number;
-            if (pesoFrecuencia === 2 && calificacionGlobalImpacto === 2) {
-                calificacionInherentePorCausa = 3.99;
-            } else {
-                calificacionInherentePorCausa = calificacionGlobalImpacto * pesoFrecuencia;
+            let cal: number = calificacionGlobalImpacto * pesoFrecuencia;
+            let excepcionAplicada = false;
+            if (excepciones.length > 0) {
+                for (const ex of excepciones) {
+                    const cond = ex.condiciones as Record<string, number>;
+                    if (cond.frecuencia === pesoFrecuencia && cond.calificacionGlobalImpacto === calificacionGlobalImpacto) {
+                        cal = ex.resultado;
+                        excepcionAplicada = true;
+                        break;
+                    }
+                }
             }
-
-            calificacionesInherentes.push(calificacionInherentePorCausa);
+            if (!excepcionAplicada && formulaBase) {
+                if (formulaBase.tipoOperacion === 'multiplicacion') {
+                    cal = calificacionGlobalImpacto * pesoFrecuencia;
+                } else if (formulaBase.tipoOperacion === 'suma') {
+                    cal = calificacionGlobalImpacto + pesoFrecuencia;
+                } else if (formulaBase.tipoOperacion === 'promedio') {
+                    cal = (calificacionGlobalImpacto + pesoFrecuencia) / 2;
+                }
+            }
+            const frecuenciaEje = Math.max(1, Math.min(5, Math.round(Number(pesoFrecuencia))));
+            causasConEje.push({ cal, frecuenciaEje });
         }
 
-        // Calcular máximo de todas las causas
-        const maxCalificacionInherente = calificacionesInherentes.length > 0
-            ? Math.max(...calificacionesInherentes)
-            : 0;
+        const calificaciones = causasConEje.map(x => x.cal);
+        let calificacionInherenteGlobal: number;
+        if (tipoAgregacion === 'maximo' || tipoAgregacion === 'maximum') {
+            calificacionInherenteGlobal = calificaciones.length > 0 ? Math.max(...calificaciones) : 0;
+        } else if (tipoAgregacion === 'promedio') {
+            calificacionInherenteGlobal = calificaciones.length > 0 ? calificaciones.reduce((a, b) => a + b, 0) / calificaciones.length : 0;
+        } else if (tipoAgregacion === 'suma') {
+            calificacionInherenteGlobal = calificaciones.reduce((a, b) => a + b, 0);
+        } else if (tipoAgregacion === 'minimo') {
+            calificacionInherenteGlobal = calificaciones.length > 0 ? Math.min(...calificaciones) : 0;
+        } else {
+            calificacionInherenteGlobal = calificaciones.length > 0 ? Math.max(...calificaciones) : 0;
+        }
 
-        // Determinar nivel de riesgo (simplificado - usar rangos estándar)
+        // Nivel de riesgo según rangos de la config (Admin > Calificación Inherente)
         let nivelRiesgo = 'Sin Calificar';
-        if (maxCalificacionInherente >= 15 && maxCalificacionInherente <= 25) {
-            nivelRiesgo = 'Crítico';
-        } else if (maxCalificacionInherente >= 10 && maxCalificacionInherente <= 14) {
-            nivelRiesgo = 'Alto';
-        } else if (maxCalificacionInherente >= 4 && maxCalificacionInherente <= 9) {
-            nivelRiesgo = 'Medio';
-        } else if ((maxCalificacionInherente >= 1 && maxCalificacionInherente <= 3) || maxCalificacionInherente === 3.99) {
-            nivelRiesgo = 'Bajo';
-        }
-
-        // Convertir riesgoInherente a probabilidad e impacto (priorizando combinaciones balanceadas)
-        let mejorProb = 1;
-        let mejorImp = 1;
-        let encontradoExacto = false;
-
-        // Primero buscar combinaciones balanceadas (prob == imp)
-        for (let prob = 5; prob >= 1; prob--) {
-            const imp = prob;
-            const valor = prob === 2 && imp === 2 ? 3.99 : prob * imp;
-            if (Math.abs(valor - maxCalificacionInherente) < 0.01) {
-                mejorProb = prob;
-                mejorImp = imp;
-                encontradoExacto = true;
+        for (const rango of rangos) {
+            const cumpleMin = rango.incluirMinimo ? calificacionInherenteGlobal >= rango.valorMinimo : calificacionInherenteGlobal > rango.valorMinimo;
+            const cumpleMax = rango.incluirMaximo ? calificacionInherenteGlobal <= rango.valorMaximo : calificacionInherenteGlobal < rango.valorMaximo;
+            if (cumpleMin && cumpleMax) {
+                nivelRiesgo = rango.nivelNombre;
                 break;
             }
         }
 
-        // Si no encontramos balanceada, buscar cualquier coincidencia exacta
-        if (!encontradoExacto) {
-            for (let imp = 5; imp >= 1; imp--) {
-                for (let prob = 1; prob <= 5; prob++) {
-                    const valor = prob === 2 && imp === 2 ? 3.99 : prob * imp;
-                    if (Math.abs(valor - maxCalificacionInherente) < 0.01) {
-                        mejorProb = prob;
-                        mejorImp = imp;
-                        encontradoExacto = true;
-                        break;
-                    }
-                }
-                if (encontradoExacto) break;
-            }
+        // Mapa: X = Frecuencia (probabilidad), Y = Impacto. Usar causa que da el máximo y sus ejes reales.
+        const impactoEje = Math.max(1, Math.min(5, Math.round(Number(calificacionGlobalImpacto))));
+        let probabilidadMapa = 1;
+        const impactoMapa = impactoEje;
+        if (causasConEje.length > 0) {
+            const causaMax = causasConEje.reduce((best, cur) => (cur.cal > best.cal ? cur : best));
+            probabilidadMapa = causaMax.frecuenciaEje;
         }
 
-        // Si no hay coincidencia exacta, buscar el más cercano >=
-        if (!encontradoExacto) {
-            let menorDiferencia = Infinity;
-            for (let prob = 1; prob <= 5; prob++) {
-                for (let imp = 1; imp <= 5; imp++) {
-                    const valor = prob === 2 && imp === 2 ? 3.99 : prob * imp;
-                    if (valor >= maxCalificacionInherente) {
-                        const diferencia = valor - maxCalificacionInherente;
-                        if (diferencia < menorDiferencia) {
-                            menorDiferencia = diferencia;
-                            mejorProb = prob;
-                            mejorImp = imp;
-                        }
-                    }
-                }
-            }
-
-            // Si aún no hay valor >=, usar el más cercano
-            if (menorDiferencia === Infinity) {
-                menorDiferencia = Infinity;
-                for (let prob = 1; prob <= 5; prob++) {
-                    for (let imp = 1; imp <= 5; imp++) {
-                        const valor = prob === 2 && imp === 2 ? 3.99 : prob * imp;
-                        const diferencia = Math.abs(maxCalificacionInherente - valor);
-                        if (diferencia < menorDiferencia) {
-                            menorDiferencia = diferencia;
-                            mejorProb = prob;
-                            mejorImp = imp;
-                        }
-                    }
-                }
-            }
-        }
-
-        // Actualizar evaluación - guardar el impacto global calculado con los nuevos pesos
         await prisma.evaluacionRiesgo.update({
             where: { riesgoId },
             data: {
-                riesgoInherente: Math.round(maxCalificacionInherente),
+                riesgoInherente: Math.round(calificacionInherenteGlobal),
                 nivelRiesgo,
-                probabilidad: mejorProb,
-                impactoGlobal: calificacionGlobalImpacto // Guardar el impacto global calculado (redondeado hacia arriba)
+                probabilidad: probabilidadMapa,
+                impactoGlobal: impactoMapa
             }
         });
 
-        console.log(`[BACKEND] ✅ Riesgo ${riesgoId}: Recalculado automáticamente - riesgoInherente=${Math.round(maxCalificacionInherente)}, Prob=${mejorProb}, ImpGlobal=${calificacionGlobalImpacto} (redondeado hacia arriba), Nivel=${nivelRiesgo}`);
+        console.log(`[BACKEND] ✅ Riesgo ${riesgoId}: Recalculado con config Calificación Inherente - riesgoInherente=${Math.round(calificacionInherenteGlobal)}, Prob(Frec)=${probabilidadMapa}, Imp=${impactoMapa}, Nivel=${nivelRiesgo}`);
     } catch (error) {
         console.error(`[BACKEND] ❌ Error al recalcular riesgo ${riesgoId} desde causas:`, error);
         // No lanzar error para no interrumpir la operación principal

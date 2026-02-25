@@ -1,3 +1,14 @@
+-- CreateTable: MapaConfig (requerida por FK en CalificacionInherenteConfig)
+CREATE TABLE IF NOT EXISTS "MapaConfig" (
+    "id" SERIAL NOT NULL,
+    "nombre" TEXT NOT NULL,
+    "ejes" TEXT,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "MapaConfig_pkey" PRIMARY KEY ("id")
+);
+
 -- CreateTable: CalificacionInherenteConfig
 CREATE TABLE IF NOT EXISTS "CalificacionInherenteConfig" (
     "id" SERIAL NOT NULL,
