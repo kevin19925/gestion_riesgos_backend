@@ -1,26 +1,89 @@
 import { Request, Response } from 'express';
 import prisma from '../prisma';
+import { redisGet, redisSet } from '../redisClient';
 
 export const getProcesos = async (req: Request, res: Response) => {
     console.log('[BACKEND] getProcesos');
     try {
+        // OPTIMIZADO: Caché Redis para reducir queries repetidas
+        const cacheKey = 'procesos:all';
+        const cached = await redisGet<any>(cacheKey);
+        if (cached) {
+            if (process.env.NODE_ENV === 'development') {
+                console.log('[BACKEND][CACHE] getProcesos HIT');
+            }
+            return res.json(cached);
+        }
+
+        // OPTIMIZADO: Usar select específico en lugar de include completo
         const procesos = await prisma.proceso.findMany({
-            include: {
-                responsable: true,
+            select: {
+                id: true,
+                nombre: true,
+                descripcion: true,
+                objetivo: true,
+                tipo: true,
+                responsableId: true,
+                areaId: true,
+                vicepresidencia: true,
+                gerencia: true,
+                estado: true,
+                activo: true,
+                analisis: true,
+                documentoUrl: true,
+                documentoNombre: true,
+                createdAt: true,
+                updatedAt: true,
+                sigla: true,
+                // OPTIMIZADO: Select específico para responsable (solo campos necesarios)
+                responsable: {
+                    select: {
+                        id: true,
+                        nombre: true,
+                        email: true
+                    }
+                },
+                // OPTIMIZADO: Select específico para responsables múltiples
                 responsables: {
-                    include: {
+                    select: {
+                        modo: true,
                         usuario: {
-                            include: {
-                                role: true,
-                                cargo: true
+                            select: {
+                                id: true,
+                                nombre: true,
+                                email: true,
+                                role: {
+                                    select: {
+                                        codigo: true,
+                                        nombre: true
+                                    }
+                                }
                             }
                         }
                     }
                 },
+                // OPTIMIZADO: Select específico para área
                 area: {
-                    include: { director: true }
+                    select: {
+                        id: true,
+                        nombre: true,
+                        director: {
+                            select: {
+                                id: true,
+                                nombre: true,
+                                email: true
+                            }
+                        }
+                    }
                 },
-                participantes: true,
+                // OPTIMIZADO: Limitar participantes a solo campos necesarios
+                participantes: {
+                    select: {
+                        id: true,
+                        nombre: true,
+                        email: true
+                    }
+                }
             },
             orderBy: { createdAt: 'desc' }
         });
@@ -28,8 +91,6 @@ export const getProcesos = async (req: Request, res: Response) => {
         // Mapear para agregar areaNombre y lista de responsables para facilitar uso en frontend
         const procesosConAreaNombre = procesos.map(p => {
             const responsablesList = (p.responsables || []).map((r: any) => {
-                // Acceder al campo modo de forma segura usando 'as any'
-                // Si el campo no existe en la BD, será undefined/null
                 const modo = r.modo !== undefined ? r.modo : null;
                 return {
                     id: r.usuario.id,
@@ -46,6 +107,9 @@ export const getProcesos = async (req: Request, res: Response) => {
                 responsablesList: responsablesList
             };
         });
+        
+        // OPTIMIZADO: Cachear resultado por 5 minutos
+        await redisSet(cacheKey, procesosConAreaNombre, 300);
         
         res.json(procesosConAreaNombre);
     } catch (error: any) {
@@ -76,29 +140,101 @@ export const getProcesoById = async (req: Request, res: Response) => {
     }
     
     try {
+        // OPTIMIZADO: Caché por proceso individual
+        const cacheKey = `proceso:${procesoId}`;
+        const cached = await redisGet<any>(cacheKey);
+        if (cached) {
+            if (process.env.NODE_ENV === 'development') {
+                console.log('[BACKEND][CACHE] getProcesoById HIT', cacheKey);
+            }
+            return res.json(cached);
+        }
+
+        // OPTIMIZADO: Usar select específico para reducir datos
         const proceso = await prisma.proceso.findUnique({
             where: { id: procesoId },
-            include: {
-                responsable: true,
+            select: {
+                id: true,
+                nombre: true,
+                descripcion: true,
+                objetivo: true,
+                tipo: true,
+                responsableId: true,
+                areaId: true,
+                vicepresidencia: true,
+                gerencia: true,
+                estado: true,
+                activo: true,
+                analisis: true,
+                documentoUrl: true,
+                documentoNombre: true,
+                createdAt: true,
+                updatedAt: true,
+                sigla: true,
+                responsable: {
+                    select: {
+                        id: true,
+                        nombre: true,
+                        email: true
+                    }
+                },
                 responsables: {
-                    include: {
-                        usuario: true
+                    select: {
+                        modo: true,
+                        usuario: {
+                            select: {
+                                id: true,
+                                nombre: true,
+                                email: true
+                            }
+                        }
                     }
                 },
                 area: {
-                    include: { director: true }
+                    select: {
+                        id: true,
+                        nombre: true,
+                        director: {
+                            select: {
+                                id: true,
+                                nombre: true,
+                                email: true
+                            }
+                        }
+                    }
                 },
-                riesgos: true,
+                // OPTIMIZADO: Limitar riesgos a solo campos básicos
+                riesgos: {
+                    select: {
+                        id: true,
+                        numero: true,
+                        descripcion: true,
+                        numeroIdentificacion: true,
+                        clasificacion: true,
+                        zona: true
+                    },
+                    take: 100 // Limitar a 100 riesgos
+                },
                 dofaItems: true,
                 normatividades: true,
                 contextos: true,
-                participantes: true,
+                participantes: {
+                    select: {
+                        id: true,
+                        nombre: true,
+                        email: true
+                    }
+                }
             }
         });
         if (!proceso) {
             console.warn('[BACKEND] getProcesoById - Proceso not found with ID:', procesoId);
             return res.status(404).json({ error: 'Proceso not found' });
         }
+        
+        // OPTIMIZADO: Cachear por 5 minutos
+        await redisSet(cacheKey, proceso, 300);
+        
         res.json(proceso);
     } catch (error) {
         console.error('[BACKEND] Error in getProcesoById:', error);
@@ -129,6 +265,10 @@ export const createProceso = async (req: Request, res: Response) => {
         const nuevoProceso = await prisma.proceso.create({
             data
         });
+        
+        // OPTIMIZADO: Invalidar caché de procesos
+        await redisSet('procesos:all', null, 0);
+        
         res.json(nuevoProceso);
     } catch (error) {
         console.error('[BACKEND] Error in createProceso:', error);
@@ -227,6 +367,10 @@ export const updateProceso = async (req: Request, res: Response) => {
             }
         });
 
+        // OPTIMIZADO: Invalidar caché de procesos
+        await redisSet('procesos:all', null, 0);
+        await redisSet(`proceso:${id}`, null, 0);
+
         // Si se actualizó la sigla, actualizar numeroIdentificacion de todos los riesgos del proceso
         if (siglaActualizada && nuevaSigla) {
             try {
@@ -266,6 +410,11 @@ export const deleteProceso = async (req: Request, res: Response) => {
     console.log(`[BACKEND] deleteProceso - id: ${id}`);
     try {
         await prisma.proceso.delete({ where: { id } });
+        
+        // OPTIMIZADO: Invalidar caché de procesos
+        await redisSet('procesos:all', null, 0);
+        await redisSet(`proceso:${id}`, null, 0);
+        
         res.json({ message: 'Proceso deleted' });
     } catch (error) {
         console.error('[BACKEND] Error in deleteProceso:', error);

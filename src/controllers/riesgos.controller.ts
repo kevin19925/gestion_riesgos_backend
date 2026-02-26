@@ -154,21 +154,92 @@ export const getRiesgoById = async (req: Request, res: Response) => {
     }
     
     try {
+        // OPTIMIZADO: Caché por riesgo individual
+        const cacheKey = `riesgo:${id}`;
+        const cached = await redisGet<any>(cacheKey);
+        if (cached) {
+            if (process.env.NODE_ENV === 'development') {
+                console.log('[BACKEND][CACHE] getRiesgoById HIT', cacheKey);
+            }
+            return res.json(cached);
+        }
+
+        // OPTIMIZADO: Usar select específico y limitar causas
         const riesgo = await prisma.riesgo.findUnique({
             where: { id },
-            include: {
+            select: {
+                id: true,
+                procesoId: true,
+                numero: true,
+                descripcion: true,
+                clasificacion: true,
+                zona: true,
+                numeroIdentificacion: true,
+                tipologiaNivelI: true,
+                tipologiaNivelII: true,
+                tipoRiesgoId: true,
+                subtipoRiesgoId: true,
+                objetivoId: true,
+                causaRiesgo: true,
+                fuenteCausa: true,
+                origen: true,
+                vicepresidenciaGerenciaAlta: true,
+                siglaVicepresidencia: true,
+                gerencia: true,
+                siglaGerencia: true,
+                createdAt: true,
+                updatedAt: true,
+                subtipoRiesgo: true,
+                tipoRiesgo: true,
                 evaluacion: true,
-                causas: true,  // Incluir causas sin controles anidados por ahora
-                priorizacion: {
-                    include: {
-                        planesAccion: true
+                // OPTIMIZADO: Limitar causas a 20 más recientes
+                causas: {
+                    take: 20,
+                    orderBy: { id: 'desc' },
+                    select: {
+                        id: true,
+                        riesgoId: true,
+                        descripcion: true,
+                        fuenteCausa: true,
+                        frecuencia: true,
+                        seleccionada: true,
+                        orden: true,
+                        tipoGestion: true,
+                        gestion: true
                     }
                 },
-                proceso: true  // Incluir proceso completo sin select específico
+                priorizacion: {
+                    select: {
+                        id: true,
+                        riesgoId: true,
+                        calificacionFinal: true,
+                        respuesta: true,
+                        responsable: true,
+                        puntajePriorizacion: true,
+                        fechaAsignacion: true,
+                        planesAccion: {
+                            take: 10,
+                            orderBy: { createdAt: 'desc' }
+                        }
+                    }
+                },
+                proceso: {
+                    select: {
+                        id: true,
+                        nombre: true,
+                        sigla: true,
+                        descripcion: true,
+                        tipo: true
+                    }
+                }
             }
         });
 
         if (!riesgo) return res.status(404).json({ error: 'Riesgo not found' });
+        
+        // OPTIMIZADO: Cachear por 2 minutos
+        await redisSet(cacheKey, riesgo, 120);
+        
         res.json(riesgo);
     } catch (error) {
         console.error('[BACKEND] Error in getRiesgoById:', error);
@@ -226,6 +297,10 @@ export const createRiesgo = async (req: Request, res: Response) => {
                 causas: true
             }
         });
+        
+        // OPTIMIZADO: Invalidar caché relacionado
+        await redisSet(`riesgos:proceso:${riesgoData.procesoId}:page:1:size:50:causas:false`, null, 0);
+        
         res.json(nuevoRiesgo);
     } catch (error: any) {
         console.error('[BACKEND] Error in createRiesgo:', error);
@@ -336,6 +411,12 @@ export const updateRiesgo = async (req: Request, res: Response) => {
             await recalcularRiesgoInherenteDesdeCausas(id);
         }
 
+        // OPTIMIZADO: Invalidar caché relacionado
+        await redisSet(`riesgo:${id}`, null, 0);
+        if (updated.procesoId) {
+            await redisSet(`riesgos:proceso:${updated.procesoId}:page:1:size:50:causas:false`, null, 0);
+        }
+
         res.json(updated);
     } catch (error) {
         console.error('[BACKEND] Error in updateRiesgo:', error);
@@ -347,7 +428,20 @@ export const deleteRiesgo = async (req: Request, res: Response) => {
     const id = Number(req.params.id);
     console.log(`[BACKEND] deleteRiesgo - id: ${id}`);
     try {
+        // Obtener procesoId antes de eliminar para invalidar caché
+        const riesgo = await prisma.riesgo.findUnique({
+            where: { id },
+            select: { procesoId: true }
+        });
+        
         await prisma.riesgo.delete({ where: { id } });
+        
+        // OPTIMIZADO: Invalidar caché relacionado
+        await redisSet(`riesgo:${id}`, null, 0);
+        if (riesgo?.procesoId) {
+            await redisSet(`riesgos:proceso:${riesgo.procesoId}:page:1:size:50:causas:false`, null, 0);
+        }
+        
         res.json({ message: 'Riesgo deleted' });
     } catch (error) {
         console.error('[BACKEND] Error in deleteRiesgo:', error);
@@ -374,27 +468,49 @@ export const getEstadisticas = async (req: Request, res: Response) => {
     const { procesoId } = req.query;
     console.log(`[BACKEND] getEstadisticas - procesoId: ${procesoId}`);
     try {
+        // OPTIMIZADO: Caché por proceso
+        const cacheKey = procesoId ? `estadisticas:proceso:${procesoId}` : 'estadisticas:all';
+        const cached = await redisGet<any>(cacheKey);
+        if (cached) {
+            if (process.env.NODE_ENV === 'development') {
+                console.log('[BACKEND][CACHE] getEstadisticas HIT', cacheKey);
+            }
+            return res.json(cached);
+        }
+
         const where: any = {};
         if (procesoId) where.procesoId = Number(procesoId);
 
-        const totalRiesgos = await prisma.riesgo.count({ where });
-
-        const riesgos = await prisma.riesgo.findMany({
-            where,
-            include: { evaluacion: true }
-        });
+        // OPTIMIZADO: Usar queries agregadas en paralelo
+        const [totalRiesgos, riesgosConEvaluacion] = await Promise.all([
+            prisma.riesgo.count({ where }),
+            prisma.riesgo.findMany({
+                where,
+                select: {
+                    clasificacion: true,
+                    evaluacion: {
+                        select: {
+                            nivelRiesgo: true
+                        }
+                    }
+                }
+            })
+        ]);
 
         const stats = {
             totalRiesgos,
-            criticos: riesgos.filter((r: any) => r.evaluacion?.nivelRiesgo === 'Crítico').length,
-            altos: riesgos.filter((r: any) => r.evaluacion?.nivelRiesgo === 'Alto').length,
-            medios: riesgos.filter((r: any) => r.evaluacion?.nivelRiesgo === 'Medio').length,
-            bajos: riesgos.filter((r: any) => r.evaluacion?.nivelRiesgo === 'Bajo').length,
-            positivos: riesgos.filter((r: any) => r.clasificacion === 'Positiva').length,
-            negativos: riesgos.filter((r: any) => r.clasificacion === 'Negativa').length,
-            evaluados: riesgos.filter((r: any) => r.evaluacion).length,
-            sinEvaluar: riesgos.filter((r: any) => !r.evaluacion).length,
+            criticos: riesgosConEvaluacion.filter((r: any) => r.evaluacion?.nivelRiesgo === 'Crítico').length,
+            altos: riesgosConEvaluacion.filter((r: any) => r.evaluacion?.nivelRiesgo === 'Alto').length,
+            medios: riesgosConEvaluacion.filter((r: any) => r.evaluacion?.nivelRiesgo === 'Medio').length,
+            bajos: riesgosConEvaluacion.filter((r: any) => r.evaluacion?.nivelRiesgo === 'Bajo').length,
+            positivos: riesgosConEvaluacion.filter((r: any) => r.clasificacion === 'Positiva').length,
+            negativos: riesgosConEvaluacion.filter((r: any) => r.clasificacion === 'Negativa').length,
+            evaluados: riesgosConEvaluacion.filter((r: any) => r.evaluacion).length,
+            sinEvaluar: riesgosConEvaluacion.filter((r: any) => !r.evaluacion).length,
         };
+
+        // OPTIMIZADO: Cachear por 2 minutos
+        await redisSet(cacheKey, stats, 120);
 
         res.json(stats);
     } catch (error) {
