@@ -2,9 +2,21 @@ import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import morgan from 'morgan';
+import compression from 'compression';
 import routes from './routes';
 
 const app = express();
+
+// OPTIMIZADO: Comprimir todas las respuestas HTTP (gzip)
+app.use(compression({
+    filter: (req, res) => {
+        if (req.headers['x-no-compression']) {
+            return false;
+        }
+        return compression.filter(req, res);
+    },
+    level: 6 // Nivel de compresión (0-9, 6 es el default y buen balance)
+}));
 
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
@@ -64,14 +76,16 @@ app.use((req, res, next) => {
 
 app.use(morgan(process.env.NODE_ENV === 'production' ? 'combined' : 'dev'));
 
-// Logger Middleware
-app.use((req, res, next) => {
-    console.log(`[BACKEND] ${new Date().toISOString()} - ${req.method} ${req.url}`);
-    if (req.body && Object.keys(req.body).length > 0) {
-        console.log('[BACKEND] Body:', JSON.stringify(req.body, null, 2));
-    }
-    next();
-});
+// OPTIMIZADO: Logger Middleware solo en desarrollo
+if (process.env.NODE_ENV === 'development') {
+    app.use((req, res, next) => {
+        console.log(`[BACKEND] ${new Date().toISOString()} - ${req.method} ${req.url}`);
+        if (req.body && Object.keys(req.body).length > 0) {
+            console.log('[BACKEND] Body:', JSON.stringify(req.body, null, 2));
+        }
+        next();
+    });
+}
 
 // Main Router
 app.use('/api', routes);
