@@ -597,3 +597,88 @@ model Documento {
   updatedAt DateTime @updatedAt
   proceso   Proceso  @relation(fields: [procesoId], references: [id], onDelete: Cascade)
 }
+
+model ConfiguracionResidual {
+  id                Int                 @id @default(autoincrement())
+  nombre            String              @unique @default("Configuración Principal")
+  activa            Boolean             @default(true)
+  descripcion       String?
+  createdAt         DateTime            @default(now())
+  updatedAt         DateTime            @updatedAt
+  pesosCriterios    PesoCriterioResidual[]
+  rangosEvaluacion  RangoEvaluacionResidual[]
+  tablaMitigacion   TablaMitigacionResidual[]
+  rangosNivelRiesgo RangoNivelRiesgoResidual[]
+  opcionesCriterios OpcionCriterioResidual[]
+}
+
+model PesoCriterioResidual {
+  id       Int                    @id @default(autoincrement())
+  configId Int
+  criterio String
+  peso     Float
+  orden    Int
+  activo   Boolean                @default(true)
+  config   ConfiguracionResidual  @relation(fields: [configId], references: [id], onDelete: Cascade)
+
+  @@index([configId])
+}
+
+model RangoEvaluacionResidual {
+  id            Int                    @id @default(autoincrement())
+  configId      Int
+  nivelNombre   String
+  valorMinimo   Float
+  valorMaximo   Float
+  incluirMinimo Boolean                @default(true)
+  incluirMaximo Boolean                @default(true)
+  orden         Int
+  activo        Boolean                @default(true)
+  config        ConfiguracionResidual  @relation(fields: [configId], references: [id], onDelete: Cascade)
+
+  @@index([configId])
+  @@index([configId, orden])
+}
+
+model TablaMitigacionResidual {
+  id         Int                    @id @default(autoincrement())
+  configId   Int
+  evaluacion String
+  porcentaje Float
+  orden      Int
+  activo     Boolean                @default(true)
+  config     ConfiguracionResidual  @relation(fields: [configId], references: [id], onDelete: Cascade)
+
+  @@index([configId])
+  @@index([configId, orden])
+}
+
+model OpcionCriterioResidual {
+  id       Int                    @id @default(autoincrement())
+  configId Int
+  criterio String
+  label    String
+  valor    Float
+  orden    Int
+  activo   Boolean                @default(true)
+  config   ConfiguracionResidual  @relation(fields: [configId], references: [id], onDelete: Cascade)
+
+  @@index([configId, criterio])
+  @@index([configId, criterio, orden])
+}
+
+model RangoNivelRiesgoResidual {
+  id            Int                    @id @default(autoincrement())
+  configId      Int
+  nivelNombre   String
+  valorMinimo   Float
+  valorMaximo   Float
+  incluirMinimo Boolean                @default(true)
+  incluirMaximo Boolean                @default(true)
+  orden         Int
+  activo        Boolean                @default(true)
+  config        ConfiguracionResidual  @relation(fields: [configId], references: [id], onDelete: Cascade)
+
+  @@index([configId])
+  @@index([configId, orden])
+}
