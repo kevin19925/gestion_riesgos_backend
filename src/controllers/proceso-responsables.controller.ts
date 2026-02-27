@@ -33,7 +33,7 @@ export const getResponsablesByProceso = async (req: Request, res: Response) => {
             id: r.id,
             procesoId: r.procesoId,
             usuario: r.usuario,
-            modo: (r as any).modo || null, // Usar 'as any' temporalmente hasta que se agregue el campo a la BD
+            modo: r.modo,
             createdAt: r.createdAt
         })));
     } catch (error) {
@@ -55,9 +55,9 @@ export const addResponsableToProceso = async (req: Request, res: Response) => {
             return res.status(400).json({ error: 'usuarioId es requerido' });
         }
         
-        // Validar modo si se proporciona
-        if (modo && !['dueño', 'supervisor', 'ambos'].includes(modo)) {
-            return res.status(400).json({ error: 'modo debe ser "dueño", "supervisor" o "ambos"' });
+        // Validar modo (ahora es obligatorio)
+        if (!modo || !['director', 'proceso'].includes(modo)) {
+            return res.status(400).json({ error: 'modo es requerido y debe ser "director" o "proceso"' });
         }
         
         // Verificar que el proceso existe
@@ -79,27 +79,22 @@ export const addResponsableToProceso = async (req: Request, res: Response) => {
             return res.status(404).json({ error: 'Usuario no encontrado' });
         }
         
-        // Si el usuario es gerente y se proporciona modo, validar
-        const esGerente = usuario.role?.codigo === 'gerente';
-        if (esGerente && !modo) {
-            return res.status(400).json({ error: 'Para usuarios gerentes, el modo (dueño o supervisor) es requerido' });
-        }
-        
-        // Crear la relación (si ya existe, actualizar el modo)
+        // Crear la relación con el modo especificado
         const procesoResponsable = await prisma.procesoResponsable.upsert({
             where: {
-                procesoId_usuarioId: {
+                procesoId_usuarioId_modo: {
                     procesoId,
-                    usuarioId: Number(usuarioId)
+                    usuarioId: Number(usuarioId),
+                    modo
                 }
             },
             update: {
-                ...(esGerente && modo ? { modo: modo as any } : {})
+                modo
             },
             create: {
                 procesoId,
                 usuarioId: Number(usuarioId),
-                ...(esGerente && modo ? { modo: modo as any } : {})
+                modo
             },
             include: {
                 usuario: {
@@ -118,13 +113,13 @@ export const addResponsableToProceso = async (req: Request, res: Response) => {
             id: procesoResponsable.id,
             procesoId: procesoResponsable.procesoId,
             usuario: procesoResponsable.usuario,
-            modo: (procesoResponsable as any).modo || null, // Usar 'as any' temporalmente hasta que se agregue el campo a la BD
+            modo: procesoResponsable.modo,
             createdAt: procesoResponsable.createdAt
         });
     } catch (error: any) {
         console.error('[BACKEND] Error in addResponsableToProceso:', error);
         if (error.code === 'P2002') {
-            return res.status(409).json({ error: 'El usuario ya es responsable de este proceso' });
+            return res.status(409).json({ error: 'El usuario ya es responsable de este proceso en este modo' });
         }
         res.status(500).json({ error: 'Error al agregar responsable' });
     }
@@ -138,12 +133,18 @@ export const removeResponsableFromProceso = async (req: Request, res: Response) 
     try {
         const procesoId = Number(req.params.procesoId);
         const usuarioId = Number(req.params.usuarioId);
+        const { modo } = req.body; // Necesitamos el modo para eliminar
+        
+        if (!modo || !['director', 'proceso'].includes(modo)) {
+            return res.status(400).json({ error: 'modo es requerido para eliminar ("director" o "proceso")' });
+        }
         
         await prisma.procesoResponsable.delete({
             where: {
-                procesoId_usuarioId: {
+                procesoId_usuarioId_modo: {
                     procesoId,
-                    usuarioId
+                    usuarioId,
+                    modo
                 }
             }
         });
@@ -161,13 +162,15 @@ export const removeResponsableFromProceso = async (req: Request, res: Response) 
 /**
  * PUT /api/procesos/:procesoId/responsables
  * Actualizar la lista completa de responsables de un proceso
- * Acepta: { responsables: [{ usuarioId: number, modo?: 'dueño' | 'supervisor' }] }
- * O: { responsablesIds: number[] } (compatibilidad hacia atrás)
+ * Acepta: { responsables: [{ usuarioId: number, modo: 'director' | 'proceso' }] }
  */
 export const updateResponsablesProceso = async (req: Request, res: Response) => {
     try {
         const procesoId = Number(req.params.procesoId);
         const { responsables, responsablesIds } = req.body;
+        
+        console.log(`[BACKEND] updateResponsablesProceso - Proceso ${procesoId}`);
+        console.log('[BACKEND] Body recibido:', JSON.stringify(req.body, null, 2));
         
         // Verificar que el proceso existe
         const proceso = await prisma.proceso.findUnique({
@@ -178,28 +181,23 @@ export const updateResponsablesProceso = async (req: Request, res: Response) => 
             return res.status(404).json({ error: 'Proceso no encontrado' });
         }
         
-        let responsablesData: Array<{ usuarioId: number; modo?: string | null }> = [];
+        let responsablesData: Array<{ usuarioId: number; modo: string }> = [];
         
-        // Compatibilidad: aceptar tanto el nuevo formato como el antiguo
+        // Aceptar formato: [{ usuarioId, modo }]
         if (Array.isArray(responsables)) {
-            // Nuevo formato: [{ usuarioId, modo }]
             responsablesData = responsables.map((r: any) => ({
                 usuarioId: Number(r.usuarioId),
-                modo: r.modo && ['dueño', 'supervisor', 'ambos'].includes(r.modo) ? r.modo : (r.modo === null ? null : undefined)
+                modo: r.modo
             }));
         } else if (Array.isArray(responsablesIds)) {
-            // Formato antiguo: solo IDs
-            responsablesData = responsablesIds.map((id: any) => ({
-                usuarioId: Number(id),
-                modo: null
-            }));
+            // Formato antiguo no soportado - requiere modo
+            return res.status(400).json({ error: 'Debe proporcionar "responsables" con modo "director" o "proceso"' });
         } else {
-            return res.status(400).json({ error: 'Debe proporcionar "responsables" o "responsablesIds"' });
+            return res.status(400).json({ error: 'Debe proporcionar "responsables"' });
         }
         
-        // Verificar que todos los usuarios existen y obtener sus roles
+        // Verificar que todos los usuarios existen
         const usuariosIds = responsablesData.map(r => r.usuarioId);
-        // Usar Set para obtener IDs únicos (un usuario puede aparecer múltiples veces con diferentes modos)
         const usuariosIdsUnicos = Array.from(new Set(usuariosIds));
         
         const usuarios = await prisma.usuario.findMany({
@@ -217,20 +215,14 @@ export const updateResponsablesProceso = async (req: Request, res: Response) => 
             });
         }
         
-        // Validar y normalizar los modos
+        // Validar que todos los modos sean válidos
         for (const responsableData of responsablesData) {
-            const usuario = usuarios.find(u => u.id === responsableData.usuarioId);
-            const esGerente = usuario?.role?.codigo === 'gerente';
-            
-            if (esGerente) {
-                // Si es gerente y tiene modo "ambos", mantenerlo
-                // Si no tiene modo o es inválido, usar 'ambos' por defecto
-                if (!responsableData.modo || !['dueño', 'supervisor', 'ambos'].includes(responsableData.modo)) {
-                    responsableData.modo = 'ambos';
-                }
-            } else {
-                // Si no es gerente, modo debe ser null
-                responsableData.modo = null;
+            if (!responsableData.modo || !['director', 'proceso'].includes(responsableData.modo)) {
+                console.log('[BACKEND] Modo inválido:', responsableData.modo);
+                return res.status(400).json({ 
+                    error: 'Cada responsable debe tener modo "director" o "proceso"',
+                    responsableInvalido: responsableData
+                });
             }
         }
         
@@ -244,8 +236,8 @@ export const updateResponsablesProceso = async (req: Request, res: Response) => 
                     data: {
                         procesoId,
                         usuarioId: r.usuarioId,
-                        ...(r.modo ? { modo: r.modo as any } : {})
-                    } as any
+                        modo: r.modo
+                    }
                 })
             )
         ]);
@@ -270,7 +262,7 @@ export const updateResponsablesProceso = async (req: Request, res: Response) => 
             id: r.id,
             procesoId: r.procesoId,
             usuario: r.usuario,
-            modo: (r as any).modo || null,
+            modo: r.modo,
             createdAt: r.createdAt
         })));
     } catch (error) {

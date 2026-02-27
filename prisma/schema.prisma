@@ -108,11 +108,11 @@ model ProcesoResponsable {
   procesoId Int
   usuarioId Int
   createdAt DateTime @default(now())
-  modo      String?  @db.VarChar(20)
+  modo      String   @db.VarChar(20)  // Ahora es obligatorio (NOT NULL)
   proceso   Proceso  @relation(fields: [procesoId], references: [id], onDelete: Cascade)
   usuario   Usuario  @relation("ProcesoResponsables", fields: [usuarioId], references: [id], onDelete: Cascade)
 
-  @@unique([procesoId, usuarioId])
+  @@unique([procesoId, usuarioId, modo])  // Constraint actualizado: incluye modo
   @@index([procesoId])
   @@index([usuarioId])
   @@index([modo])
