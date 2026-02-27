@@ -21,6 +21,7 @@ import contextoRoutes from './contexto.routes';
 import uploadRoutes from './upload.routes';
 import procesoResponsablesRoutes from './proceso-responsables.routes';
 import calificacionInherenteRoutes from './calificacion-inherente.routes';
+import configuracionResidualRoutes from './configuracionResidual.routes';
 
 const router = Router();
 
@@ -56,5 +57,6 @@ router.use('/contexto', contextoRoutes);
 router.use('/upload', uploadRoutes);
 router.use('/procesos', procesoResponsablesRoutes);
 router.use('/calificacion-inherente', calificacionInherenteRoutes);
+router.use('/configuracion-residual', configuracionResidualRoutes);
 
 export default router;
