@@ -79,36 +79,29 @@ export const addResponsableToProceso = async (req: Request, res: Response) => {
             return res.status(404).json({ error: 'Usuario no encontrado' });
         }
         
-        // Crear la relación con el modo especificado
-        const procesoResponsable = await prisma.procesoResponsable.upsert({
-            where: {
-                procesoId_usuarioId_modo: {
-                    procesoId,
-                    usuarioId: Number(usuarioId),
-                    modo
-                }
-            },
-            update: {
-                modo
-            },
-            create: {
-                procesoId,
-                usuarioId: Number(usuarioId),
-                modo
-            },
+        // Buscar si ya existe (procesoId + usuarioId + modo)
+        const existente = await prisma.procesoResponsable.findFirst({
+            where: { procesoId, usuarioId: Number(usuarioId), modo },
             include: {
                 usuario: {
-                    select: {
-                        id: true,
-                        nombre: true,
-                        email: true,
-                        role: true,
-                        cargo: true
-                    }
+                    select: { id: true, nombre: true, email: true, role: true, cargo: true }
                 }
             }
         });
-        
+
+        const procesoResponsable = existente ?? await prisma.procesoResponsable.create({
+                data: {
+                    procesoId,
+                    usuarioId: Number(usuarioId),
+                    modo
+                },
+                include: {
+                    usuario: {
+                        select: { id: true, nombre: true, email: true, role: true, cargo: true }
+                    }
+                }
+            });
+
         res.json({
             id: procesoResponsable.id,
             procesoId: procesoResponsable.procesoId,
@@ -139,14 +132,14 @@ export const removeResponsableFromProceso = async (req: Request, res: Response) 
             return res.status(400).json({ error: 'modo es requerido para eliminar ("director" o "proceso")' });
         }
         
+        const row = await prisma.procesoResponsable.findFirst({
+            where: { procesoId, usuarioId, modo }
+        });
+        if (!row) {
+            return res.status(404).json({ error: 'Responsable no encontrado' });
+        }
         await prisma.procesoResponsable.delete({
-            where: {
-                procesoId_usuarioId_modo: {
-                    procesoId,
-                    usuarioId,
-                    modo
-                }
-            }
+            where: { id: row.id }
         });
         
         res.json({ message: 'Responsable eliminado correctamente' });
