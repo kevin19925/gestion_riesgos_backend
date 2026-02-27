@@ -266,6 +266,31 @@ export const createProceso = async (req: Request, res: Response) => {
             data
         });
         
+        // NUEVO: Si se asignó un responsableId, crear registro en ProcesoResponsable con modo="proceso"
+        if (responsableId && Number(responsableId) > 0) {
+            try {
+                await prisma.procesoResponsable.upsert({
+                    where: {
+                        procesoId_usuarioId_modo: {
+                            procesoId: nuevoProceso.id,
+                            usuarioId: Number(responsableId),
+                            modo: 'proceso'
+                        }
+                    },
+                    create: {
+                        procesoId: nuevoProceso.id,
+                        usuarioId: Number(responsableId),
+                        modo: 'proceso'
+                    },
+                    update: {} // No actualizar nada si ya existe
+                });
+                console.log(`[BACKEND] createProceso - Creado responsable en ProcesoResponsable (usuarioId: ${responsableId}, modo: proceso)`);
+            } catch (error) {
+                console.error('[BACKEND] Error creando ProcesoResponsable:', error);
+                // No fallar la creación del proceso si falla esto
+            }
+        }
+        
         // OPTIMIZADO: Invalidar caché de procesos
         await redisSet('procesos:all', null, 0);
         
@@ -300,7 +325,7 @@ export const updateProceso = async (req: Request, res: Response) => {
             // Verificar si la sigla realmente cambió
             const procesoActual = await prisma.proceso.findUnique({
                 where: { id },
-                select: { sigla: true }
+                select: { sigla: true, responsableId: true }
             });
             if (procesoActual?.sigla !== nuevaSigla) {
                 siglaActualizada = true;
@@ -308,7 +333,15 @@ export const updateProceso = async (req: Request, res: Response) => {
             }
         }
 
-        if (responsableId) updateData.responsableId = Number(responsableId);
+        // Guardar el responsableId anterior para comparar
+        const procesoAnterior = await prisma.proceso.findUnique({
+            where: { id },
+            select: { responsableId: true }
+        });
+
+        if (responsableId !== undefined) {
+            updateData.responsableId = responsableId ? Number(responsableId) : null;
+        }
         if (areaId) updateData.areaId = Number(areaId);
 
         if (dofaItems) {
@@ -366,6 +399,52 @@ export const updateProceso = async (req: Request, res: Response) => {
                 participantes: true,
             }
         });
+
+        // NUEVO: Sincronizar ProcesoResponsable cuando cambia responsableId
+        if (responsableId !== undefined) {
+            const nuevoResponsableId = responsableId ? Number(responsableId) : null;
+            const anteriorResponsableId = procesoAnterior?.responsableId;
+
+            // Si cambió el responsableId
+            if (nuevoResponsableId !== anteriorResponsableId) {
+                try {
+                    // Eliminar el responsable anterior con modo="proceso" si existía
+                    if (anteriorResponsableId) {
+                        await prisma.procesoResponsable.deleteMany({
+                            where: {
+                                procesoId: id,
+                                usuarioId: anteriorResponsableId,
+                                modo: 'proceso'
+                            }
+                        });
+                        console.log(`[BACKEND] updateProceso - Eliminado responsable anterior (usuarioId: ${anteriorResponsableId}, modo: proceso)`);
+                    }
+
+                    // Crear el nuevo responsable con modo="proceso" si hay uno nuevo
+                    if (nuevoResponsableId && nuevoResponsableId > 0) {
+                        await prisma.procesoResponsable.upsert({
+                            where: {
+                                procesoId_usuarioId_modo: {
+                                    procesoId: id,
+                                    usuarioId: nuevoResponsableId,
+                                    modo: 'proceso'
+                                }
+                            },
+                            create: {
+                                procesoId: id,
+                                usuarioId: nuevoResponsableId,
+                                modo: 'proceso'
+                            },
+                            update: {} // No actualizar nada si ya existe
+                        });
+                        console.log(`[BACKEND] updateProceso - Creado/actualizado responsable (usuarioId: ${nuevoResponsableId}, modo: proceso)`);
+                    }
+                } catch (error) {
+                    console.error('[BACKEND] Error sincronizando ProcesoResponsable:', error);
+                    // No fallar la actualización del proceso si falla esto
+                }
+            }
+        }
 
         // OPTIMIZADO: Invalidar caché de procesos
         await redisSet('procesos:all', null, 0);
@@ -430,7 +509,7 @@ export const bulkUpdateProcesos = async (req: Request, res: Response) => {
         }
 
         const updated = await Promise.all(
-            procesos.map(p => {
+            procesos.map(async p => {
                 const updateData: any = {};
                 
                 // Only include fields if they're provided
@@ -459,10 +538,48 @@ export const bulkUpdateProcesos = async (req: Request, res: Response) => {
                 
                 console.log(`[BACKEND] Updating proceso ${p.id} with:`, updateData);
                 
-                return prisma.proceso.update({
+                const procesoActualizado = await prisma.proceso.update({
                     where: { id: Number(p.id) },
                     data: updateData
                 });
+
+                // NUEVO: Sincronizar ProcesoResponsable si cambió responsableId
+                if (p.responsableId !== undefined) {
+                    try {
+                        const nuevoResponsableId = updateData.responsableId;
+                        
+                        // Eliminar responsables anteriores con modo="proceso"
+                        await prisma.procesoResponsable.deleteMany({
+                            where: {
+                                procesoId: Number(p.id),
+                                modo: 'proceso'
+                            }
+                        });
+
+                        // Crear nuevo responsable si hay uno
+                        if (nuevoResponsableId && nuevoResponsableId > 0) {
+                            await prisma.procesoResponsable.upsert({
+                                where: {
+                                    procesoId_usuarioId_modo: {
+                                        procesoId: Number(p.id),
+                                        usuarioId: nuevoResponsableId,
+                                        modo: 'proceso'
+                                    }
+                                },
+                                create: {
+                                    procesoId: Number(p.id),
+                                    usuarioId: nuevoResponsableId,
+                                    modo: 'proceso'
+                                },
+                                update: {}
+                            });
+                        }
+                    } catch (error) {
+                        console.error(`[BACKEND] Error sincronizando ProcesoResponsable para proceso ${p.id}:`, error);
+                    }
+                }
+
+                return procesoActualizado;
             })
         );
         res.json(updated);

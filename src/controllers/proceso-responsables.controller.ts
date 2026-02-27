@@ -164,6 +164,7 @@ export const updateResponsablesProceso = async (req: Request, res: Response) => 
         
         console.log(`[BACKEND] updateResponsablesProceso - Proceso ${procesoId}`);
         console.log('[BACKEND] Body recibido:', JSON.stringify(req.body, null, 2));
+        console.log('[BACKEND] Headers:', JSON.stringify(req.headers, null, 2));
         
         // Verificar que el proceso existe
         const proceso = await prisma.proceso.findUnique({
@@ -208,16 +209,32 @@ export const updateResponsablesProceso = async (req: Request, res: Response) => 
             });
         }
         
-        // Validar que todos los modos sean válidos
+        // Expandir "ambos" a dos registros separados
+        const responsablesExpandidos: Array<{ usuarioId: number; modo: string }> = [];
         for (const responsableData of responsablesData) {
-            if (!responsableData.modo || !['director', 'proceso'].includes(responsableData.modo)) {
+            if (responsableData.modo === 'ambos') {
+                // Crear dos registros: uno como director y otro como proceso
+                responsablesExpandidos.push({
+                    usuarioId: responsableData.usuarioId,
+                    modo: 'director'
+                });
+                responsablesExpandidos.push({
+                    usuarioId: responsableData.usuarioId,
+                    modo: 'proceso'
+                });
+            } else if (['director', 'proceso'].includes(responsableData.modo)) {
+                responsablesExpandidos.push(responsableData);
+            } else {
                 console.log('[BACKEND] Modo inválido:', responsableData.modo);
                 return res.status(400).json({ 
-                    error: 'Cada responsable debe tener modo "director" o "proceso"',
+                    error: 'Cada responsable debe tener modo "director", "proceso" o "ambos"',
                     responsableInvalido: responsableData
                 });
             }
         }
+        
+        // Usar los responsables expandidos en lugar de los originales
+        responsablesData = responsablesExpandidos;
         
         // Eliminar todos los responsables actuales y crear los nuevos
         await prisma.$transaction([
