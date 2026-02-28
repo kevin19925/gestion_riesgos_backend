@@ -24,7 +24,6 @@ jobs:
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           script_stop: true
           script: |
-            set -e
             mkdir -p ~/app-empresa
             cd ~/app-empresa
 
@@ -39,16 +38,15 @@ jobs:
               URL="https://github.com/${REPO}.git"
             fi
             if [ ! -d ".git" ]; then
-              [ -n "$(ls -A 2>/dev/null)" ] && rm -rf ./* ./.[!.]* 2>/dev/null || true
-              git clone "$URL" .
-              git checkout main 2>/dev/null || git checkout master
+              find . -maxdepth 1 -mindepth 1 -exec rm -rf {} + 2>/dev/null || true
+              git clone "$URL" . || ( find . -maxdepth 1 -mindepth 1 -exec rm -rf {} + 2>/dev/null; git clone "$URL" . || exit 1 )
+              git checkout main 2>/dev/null || git checkout master || true
             else
               git remote set-url origin "$URL" 2>/dev/null || true
-              git fetch origin main 2>/dev/null || git fetch origin master
-              git reset --hard origin/main 2>/dev/null || git reset --hard origin/master
-              git checkout main 2>/dev/null || git checkout master
+              ( git fetch origin main && git reset --hard origin/main && git checkout main ) || ( git fetch origin master && git reset --hard origin/master && git checkout master )
             fi
 
+            set -e
             echo "==> .env..."
             echo "${{ secrets.DOTENV_FILE }}" > .env
 
