@@ -1,6 +1,6 @@
 # Backend Gestión de Riesgos
 # Uso: docker compose up -d --build
-# Variables: DATABASE_URL (obligatorio), REDIS_URL (opcional), PORT (opcional, default 8080)
+# Variables: crear .env en el mismo directorio con DATABASE_URL (obligatorio), REDIS_URL (opcional), PORT (opcional)
 
 services:
   app:
@@ -9,6 +9,7 @@ services:
       dockerfile: Dockerfile
     container_name: gestion-riesgos-backend
     restart: unless-stopped
+    env_file: .env
     ports:
       - "${PORT:-8080}:8080"
     environment:
