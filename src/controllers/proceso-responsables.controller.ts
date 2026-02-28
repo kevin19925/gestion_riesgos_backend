@@ -275,9 +275,15 @@ export const updateResponsablesProceso = async (req: Request, res: Response) => 
             modo: r.modo,
             createdAt: r.createdAt
         })));
-    } catch (error) {
+    } catch (error: any) {
         console.error('[BACKEND] Error in updateResponsablesProceso:', error);
-        res.status(500).json({ error: 'Error al actualizar responsables' });
+        console.error('[BACKEND] Error stack:', error?.stack);
+        console.error('[BACKEND] Error message:', error?.message);
+        res.status(500).json({ 
+            error: 'Error al actualizar responsables',
+            details: error?.message || String(error),
+            code: error?.code || 'UNKNOWN'
+        });
     }
 };
 
