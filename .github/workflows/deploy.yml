@@ -33,7 +33,10 @@ jobs:
             fi
 
             # 2. Variables de entorno
-            printf '%s\n' "${{ secrets.DOTENV_FILE }}" > .env
+            # Escribir el secret tal cual (sin que bash interprete comillas o ; )
+            cat > .env <<'EOF'
+            ${{ secrets.DOTENV_FILE }}
+            EOF
             # Normalizar: quitar BOM UTF-8 y CRLF (Windows)
             sed -i '1s/^\xEF\xBB\xBF//' .env 2>/dev/null || true
             tr -d '\r' < .env > .env.__tmp && mv .env.__tmp .env
