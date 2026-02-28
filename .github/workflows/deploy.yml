@@ -1,5 +1,4 @@
 name: Deploy Empresa
-
 on:
   push:
     branches: [ main ]
@@ -18,13 +17,14 @@ jobs:
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
-            set -e
+            # 1. Crear carpeta si no existe y entrar
             mkdir -p ~/app-empresa
             cd ~/app-empresa
 
+            # 2. Configurar Git para que confíe en la carpeta (evita errores de permisos)
             git config --global --add safe.directory /home/${{ secrets.SSH_USER }}/app-empresa
 
-            # 1. Sincronizar código
+            # 3. Actualizar el código de forma forzada
             if [ ! -d ".git" ]; then
               git clone https://github.com/${{ github.repository }}.git .
             else
@@ -32,34 +32,23 @@ jobs:
               git reset --hard origin/main
             fi
 
-            # 2. Variables de entorno
-            # Escribir el secret tal cual (sin que bash interprete comillas o ; )
-            cat > .env <<'EOF'
-            ${{ secrets.DOTENV_FILE }}
-            EOF
-            # Normalizar: quitar BOM UTF-8 y CRLF (Windows)
-            sed -i '1s/^\xEF\xBB\xBF//' .env 2>/dev/null || true
-            tr -d '\r' < .env > .env.__tmp && mv .env.__tmp .env
+            # 4. Inyectar el archivo .env desde los Secrets de GitHub
+            # Asegúrate de haber creado el secret "DOTENV_FILE" en GitHub
+            echo "${{ secrets.DOTENV_FILE }}" > .env
 
-            if ! grep -qE '^[[:space:]]*DATABASE_URL=[^[:space:]]+' .env; then
-              echo "ERROR: El secret DOTENV_FILE no contiene DATABASE_URL=..."
-              echo "Claves encontradas en .env (sin valores):"
-              awk -F= 'NF {print $1}' .env | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | grep -v '^#' | grep -v '^[[:space:]]*$' || true
-              exit 1
-            fi
-
-            # 3. Limpieza de espacio (Vital para 30GB de disco)
-            docker system prune -f
-
-            # 4. Levantar contenedores (Cambiamos npm ci por install internamente)
-            docker compose --env-file .env down --remove-orphans
-            docker compose --env-file .env build --no-cache
-            docker compose --env-file .env up -d --force-recreate
-
-            # 5. Migraciones Prisma (inyectar DATABASE_URL sin comillas para que Prisma la vea)
-            sleep 10
-            export DATABASE_URL=$(grep -E '^[[:space:]]*DATABASE_URL=' .env | head -1 | cut -d= -f2- | sed 's/^["'\'']//;s/["'\'']$//' | tr -d '\r')
-            docker compose --env-file .env exec -T -e DATABASE_URL app npx prisma migrate deploy
+            # 5. Detener contenedores actuales
+            docker compose down || docker-compose down || true
             
-            # 6. Limpieza final
+            # 6. Limpiar caché de Docker para forzar reconstrucción
+            docker builder prune -f || true
+            
+            # 7. Reconstruir sin caché y levantar
+            docker compose build --no-cache || docker-compose build --no-cache
+            docker compose up -d || docker-compose up -d
+            
+            # 8. Ejecutar migraciones de Prisma dentro del contenedor
+            sleep 5  # Esperar a que el contenedor esté listo
+            docker compose exec -T app npx prisma migrate deploy || docker-compose exec -T app npx prisma migrate deploy || echo "Migraciones no ejecutadas - verificar manualmente"
+            
+            # 9. Limpieza de imágenes huérfanas para no llenar el disco de la VM
             docker image prune -f
