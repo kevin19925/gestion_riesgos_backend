@@ -39,11 +39,23 @@ jobs:
             fi
             if [ ! -d ".git" ]; then
               find . -maxdepth 1 -mindepth 1 -exec rm -rf {} + 2>/dev/null || true
-              git clone "$URL" . || ( find . -maxdepth 1 -mindepth 1 -exec rm -rf {} + 2>/dev/null; git clone "$URL" . || exit 1 )
+              if ! git clone "$URL" . 2>&1; then
+                echo "==> Primer clone falló, limpiando y reintentando..."
+                find . -maxdepth 1 -mindepth 1 -exec rm -rf {} + 2>/dev/null || true
+                if ! git clone "$URL" . 2>&1; then
+                  echo "==> ERROR: git clone falló. Si el repo es privado, añade el secret GH_CLONE_TOKEN (PAT) en Settings > Secrets."
+                  exit 1
+                fi
+              fi
               git checkout main 2>/dev/null || git checkout master || true
             else
               git remote set-url origin "$URL" 2>/dev/null || true
-              ( git fetch origin main && git reset --hard origin/main && git checkout main ) || ( git fetch origin master && git reset --hard origin/master && git checkout master )
+              if ! ( git fetch origin main && git reset --hard origin/main && git checkout main ); then
+                if ! ( git fetch origin master && git reset --hard origin/master && git checkout master ); then
+                  echo "==> ERROR: git fetch/reset falló. Si el repo es privado, añade GH_CLONE_TOKEN."
+                  exit 1
+                fi
+              fi
             fi
 
             set -e
