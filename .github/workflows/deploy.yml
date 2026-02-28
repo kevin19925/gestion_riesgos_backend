@@ -39,5 +39,8 @@ jobs:
             # 5. Levantar el servicio (Prueba ambos comandos por si la versión de Docker varía)
             docker compose up -d --build || docker-compose up -d --build
             
-            # 6. Limpieza de imágenes huérfanas para no llenar el disco de la VM
+            # 6. Ejecutar migraciones de Prisma dentro del contenedor
+            docker compose exec -T app npx prisma migrate deploy || docker-compose exec -T app npx prisma migrate deploy || echo "Migraciones no ejecutadas - verificar manualmente"
+            
+            # 7. Limpieza de imágenes huérfanas para no llenar el disco de la VM
             docker image prune -f
