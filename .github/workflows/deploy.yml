@@ -56,9 +56,10 @@ jobs:
             docker compose --env-file .env build --no-cache
             docker compose --env-file .env up -d --force-recreate
 
-            # 5. Migraciones Prisma
+            # 5. Migraciones Prisma (inyectar DATABASE_URL sin comillas para que Prisma la vea)
             sleep 10
-            docker compose --env-file .env exec -T app npx prisma migrate deploy
+            export DATABASE_URL=$(grep -E '^[[:space:]]*DATABASE_URL=' .env | head -1 | cut -d= -f2- | sed 's/^["'\'']//;s/["'\'']$//' | tr -d '\r')
+            docker compose --env-file .env exec -T -e DATABASE_URL app npx prisma migrate deploy
             
             # 6. Limpieza final
             docker image prune -f
