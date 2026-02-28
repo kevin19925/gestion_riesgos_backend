@@ -34,18 +34,24 @@ jobs:
 
             # 2. Variables de entorno
             echo "${{ secrets.DOTENV_FILE }}" > .env
+            if ! grep -q '^DATABASE_URL=' .env; then
+              echo "ERROR: El secret DOTENV_FILE no contiene DATABASE_URL=..."
+              echo "Claves encontradas en .env (sin valores):"
+              sed -E 's/=.*$//' .env | sed '/^[[:space:]]*$/d'
+              exit 1
+            fi
 
             # 3. Limpieza de espacio (Vital para 30GB de disco)
             docker system prune -f
 
             # 4. Levantar contenedores (Cambiamos npm ci por install internamente)
-            docker compose down --remove-orphans
-            docker compose build --no-cache
-            docker compose up -d --force-recreate
+            docker compose --env-file .env down --remove-orphans
+            docker compose --env-file .env build --no-cache
+            docker compose --env-file .env up -d --force-recreate
 
             # 5. Migraciones Prisma
             sleep 10
-            docker compose exec -T app npx prisma migrate deploy || echo "Migraciones saltadas"
+            docker compose --env-file .env exec -T app npx prisma migrate deploy
             
             # 6. Limpieza final
             docker image prune -f
