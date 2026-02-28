@@ -236,21 +236,23 @@ export const updateResponsablesProceso = async (req: Request, res: Response) => 
         // Usar los responsables expandidos en lugar de los originales
         responsablesData = responsablesExpandidos;
         
-        // Eliminar todos los responsables actuales y crear los nuevos
-        await prisma.$transaction([
-            prisma.procesoResponsable.deleteMany({
-                where: { procesoId }
-            }),
-            ...responsablesData.map((r) =>
-                prisma.procesoResponsable.create({
-                    data: {
-                        procesoId,
-                        usuarioId: r.usuarioId,
-                        modo: r.modo
-                    }
-                })
-            )
-        ]);
+        // Estrategia más robusta: eliminar y crear en pasos separados
+        // Primero eliminar todos los responsables actuales
+        await prisma.procesoResponsable.deleteMany({
+            where: { procesoId }
+        });
+        
+        // Luego crear los nuevos (usando createMany para mejor performance)
+        if (responsablesData.length > 0) {
+            await prisma.procesoResponsable.createMany({
+                data: responsablesData.map((r) => ({
+                    procesoId,
+                    usuarioId: r.usuarioId,
+                    modo: r.modo
+                })),
+                skipDuplicates: true // Saltar duplicados en lugar de fallar
+            });
+        }
         
         // Obtener los responsables actualizados
         const responsablesActualizados = await prisma.procesoResponsable.findMany({
