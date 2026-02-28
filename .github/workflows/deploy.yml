@@ -36,11 +36,19 @@ jobs:
             # Asegúrate de haber creado el secret "DOTENV_FILE" en GitHub
             echo "${{ secrets.DOTENV_FILE }}" > .env
 
-            # 5. Levantar el servicio (Prueba ambos comandos por si la versión de Docker varía)
-            docker compose up -d --build || docker-compose up -d --build
+            # 5. Detener contenedores actuales
+            docker compose down || docker-compose down || true
             
-            # 6. Ejecutar migraciones de Prisma dentro del contenedor
+            # 6. Limpiar caché de Docker para forzar reconstrucción
+            docker builder prune -f || true
+            
+            # 7. Reconstruir sin caché y levantar
+            docker compose build --no-cache || docker-compose build --no-cache
+            docker compose up -d || docker-compose up -d
+            
+            # 8. Ejecutar migraciones de Prisma dentro del contenedor
+            sleep 5  # Esperar a que el contenedor esté listo
             docker compose exec -T app npx prisma migrate deploy || docker-compose exec -T app npx prisma migrate deploy || echo "Migraciones no ejecutadas - verificar manualmente"
             
-            # 7. Limpieza de imágenes huérfanas para no llenar el disco de la VM
+            # 9. Limpieza de imágenes huérfanas para no llenar el disco de la VM
             docker image prune -f
