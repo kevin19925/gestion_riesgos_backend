@@ -17,14 +17,12 @@ jobs:
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
-            # 1. Crear carpeta si no existe y entrar
+            set -e
             mkdir -p ~/app-empresa
             cd ~/app-empresa
 
-            # 2. Configurar Git para que confíe en la carpeta (evita errores de permisos)
             git config --global --add safe.directory /home/${{ secrets.SSH_USER }}/app-empresa
 
-            # 3. Actualizar el código de forma forzada
             if [ ! -d ".git" ]; then
               git clone https://github.com/${{ github.repository }}.git .
             else
@@ -32,23 +30,20 @@ jobs:
               git reset --hard origin/main
             fi
 
-            # 4. Inyectar el archivo .env desde los Secrets de GitHub
-            # Asegúrate de haber creado el secret "DOTENV_FILE" en GitHub
-            echo "${{ secrets.DOTENV_FILE }}" > .env
+            # .env desde secret (heredoc evita que comillas/; rompan el script)
+            cat > .env <<'END_ENV_CONTENT'
+            ${{ secrets.DOTENV_FILE }}
+            END_ENV_CONTENT
+            sed -i '1s/^\xEF\xBB\xBF//' .env 2>/dev/null || true
+            tr -d '\r' < .env > .env.tmp && mv .env.tmp .env
 
-            # 5. Detener contenedores actuales
-            docker compose down || docker-compose down || true
-            
-            # 6. Limpiar caché de Docker para forzar reconstrucción
-            docker builder prune -f || true
-            
-            # 7. Reconstruir sin caché y levantar
-            docker compose build --no-cache || docker-compose build --no-cache
-            docker compose up -d || docker-compose up -d
-            
-            # 8. Ejecutar migraciones de Prisma dentro del contenedor
-            sleep 5  # Esperar a que el contenedor esté listo
-            docker compose exec -T app npx prisma migrate deploy || docker-compose exec -T app npx prisma migrate deploy || echo "Migraciones no ejecutadas - verificar manualmente"
-            
-            # 9. Limpieza de imágenes huérfanas para no llenar el disco de la VM
-            docker image prune -f
+            docker compose --env-file .env down --remove-orphans 2>/dev/null || docker-compose --env-file .env down --remove-orphans 2>/dev/null || true
+            docker builder prune -f 2>/dev/null || true
+            docker compose --env-file .env build --no-cache || docker-compose --env-file .env build --no-cache
+            docker compose --env-file .env up -d || docker-compose --env-file .env up -d
+
+            sleep 8
+            export DATABASE_URL=$(grep -E '^[[:space:]]*DATABASE_URL=' .env | head -1 | cut -d= -f2- | sed 's/^["'\'']//;s/["'\'']$//' | tr -d '\r')
+            docker compose --env-file .env exec -T -e DATABASE_URL app npx prisma migrate deploy 2>/dev/null || docker-compose --env-file .env exec -T -e DATABASE_URL app npx prisma migrate deploy || echo "Migraciones omitidas - revisar DOTENV_FILE si aplica"
+
+            docker image prune -f 2>/dev/null || true
