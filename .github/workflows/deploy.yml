@@ -1,8 +1,8 @@
 # =============================================================================
 # Deploy Backend - Gestión de Riesgos
 # Rama: main. Cada push a main despliega en el servidor vía SSH + Docker.
-# Las notificaciones de éxito/fallo las envía GitHub automáticamente al correo
-# de tu cuenta (sin configurar nada más).
+# Repo privado: en GitHub → Settings → Secrets → añadir GH_CLONE_TOKEN (Personal
+# Access Token con permiso repo) para que el servidor pueda hacer git clone.
 # =============================================================================
 
 name: Deploy Backend
@@ -38,9 +38,16 @@ jobs:
             git config --global --add safe.directory "$DEPLOY_DIR" 2>/dev/null || true
 
             echo "==> Actualizando código (main)..."
-            if [ ! -d ".git" ]; then
-              git clone --branch main https://github.com/${{ github.repository }}.git .
+            REPO="${{ github.repository }}"
+            if [ -n "${{ secrets.GH_CLONE_TOKEN }}" ]; then
+              CLONE_URL="https://x-access-token:${{ secrets.GH_CLONE_TOKEN }}@github.com/${REPO}.git"
             else
+              CLONE_URL="https://github.com/${REPO}.git"
+            fi
+            if [ ! -d ".git" ]; then
+              git clone --branch main "$CLONE_URL" .
+            else
+              git remote set-url origin "$CLONE_URL" 2>/dev/null || true
               git fetch origin main
               git reset --hard origin/main
               git checkout main
