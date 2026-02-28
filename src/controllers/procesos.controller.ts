@@ -1,19 +1,14 @@
 import { Request, Response } from 'express';
 import prisma from '../prisma';
+import { getDeleteErrorMessage } from '../utils/prismaErrors';
 import { redisGet, redisSet } from '../redisClient';
 
 export const getProcesos = async (req: Request, res: Response) => {
-    console.log('[BACKEND] getProcesos');
     try {
         // OPTIMIZADO: Caché Redis para reducir queries repetidas
         const cacheKey = 'procesos:all';
         const cached = await redisGet<any>(cacheKey);
-        if (cached) {
-            if (process.env.NODE_ENV === 'development') {
-                console.log('[BACKEND][CACHE] getProcesos HIT');
-            }
-            return res.json(cached);
-        }
+        if (cached) return res.json(cached);
 
         // OPTIMIZADO: Usar select específico en lugar de include completo
         const procesos = await prisma.proceso.findMany({
@@ -113,8 +108,6 @@ export const getProcesos = async (req: Request, res: Response) => {
         
         res.json(procesosConAreaNombre);
     } catch (error: any) {
-        console.error('[BACKEND] Error in getProcesos:', error);
-        console.error('[BACKEND] Error details:', error?.message, error?.stack);
         res.status(500).json({ 
             error: 'Error fetching procesos',
             details: error?.message || String(error)
@@ -127,15 +120,10 @@ export const getProcesoById = async (req: Request, res: Response) => {
     
     // Validate ID exists and is a valid number
     if (!id || id === 'undefined' || id === '') {
-        console.warn('[BACKEND] getProcesoById - Invalid or missing ID:', id);
         return res.status(400).json({ error: 'Proceso ID is required and must be a valid number' });
     }
-    
     const procesoId = Number(id);
-    console.log(`[BACKEND] getProcesoById - id: ${id}, parsed as: ${procesoId}`);
-    
     if (isNaN(procesoId) || procesoId <= 0) {
-        console.warn('[BACKEND] getProcesoById - Invalid (non-numeric or <= 0) ID:', id);
         return res.status(400).json({ error: 'Invalid proceso ID - must be a positive number' });
     }
     
@@ -143,12 +131,7 @@ export const getProcesoById = async (req: Request, res: Response) => {
         // OPTIMIZADO: Caché por proceso individual
         const cacheKey = `proceso:${procesoId}`;
         const cached = await redisGet<any>(cacheKey);
-        if (cached) {
-            if (process.env.NODE_ENV === 'development') {
-                console.log('[BACKEND][CACHE] getProcesoById HIT', cacheKey);
-            }
-            return res.json(cached);
-        }
+        if (cached) return res.json(cached);
 
         // OPTIMIZADO: Usar select específico para reducir datos
         const proceso = await prisma.proceso.findUnique({
@@ -227,23 +210,18 @@ export const getProcesoById = async (req: Request, res: Response) => {
                 }
             }
         });
-        if (!proceso) {
-            console.warn('[BACKEND] getProcesoById - Proceso not found with ID:', procesoId);
-            return res.status(404).json({ error: 'Proceso not found' });
-        }
+        if (!proceso) return res.status(404).json({ error: 'Proceso not found' });
         
         // OPTIMIZADO: Cachear por 5 minutos
         await redisSet(cacheKey, proceso, 300);
         
         res.json(proceso);
     } catch (error) {
-        console.error('[BACKEND] Error in getProcesoById:', error);
         res.status(500).json({ error: 'Error fetching proceso' });
     }
 };
 
 export const createProceso = async (req: Request, res: Response) => {
-    console.log('[BACKEND] createProceso - body:', JSON.stringify(req.body, null, 2));
     const { nombre, descripcion, objetivo, tipo, responsableId, areaId, ...rest } = req.body;
     try {
         const data: any = {
@@ -284,9 +262,7 @@ export const createProceso = async (req: Request, res: Response) => {
                     },
                     update: {} // No actualizar nada si ya existe
                 });
-                console.log(`[BACKEND] createProceso - Creado responsable en ProcesoResponsable (usuarioId: ${responsableId}, modo: proceso)`);
             } catch (error) {
-                console.error('[BACKEND] Error creando ProcesoResponsable:', error);
                 // No fallar la creación del proceso si falla esto
             }
         }
@@ -296,7 +272,6 @@ export const createProceso = async (req: Request, res: Response) => {
         
         res.json(nuevoProceso);
     } catch (error) {
-        console.error('[BACKEND] Error in createProceso:', error);
         res.status(500).json({
             error: 'Error creating proceso',
             details: error instanceof Error ? error.message : String(error)
@@ -306,7 +281,6 @@ export const createProceso = async (req: Request, res: Response) => {
 
 export const updateProceso = async (req: Request, res: Response) => {
     const id = Number(req.params.id);
-    console.log(`[BACKEND] updateProceso - id: ${id}`);
     const { dofaItems, normatividades, contextos, participantesIds, id: bodyId, responsableId, areaId, ...rest } = req.body;
     try {
         const updateData: any = { ...rest };
@@ -417,7 +391,6 @@ export const updateProceso = async (req: Request, res: Response) => {
                                 modo: 'proceso'
                             }
                         });
-                        console.log(`[BACKEND] updateProceso - Eliminado responsable anterior (usuarioId: ${anteriorResponsableId}, modo: proceso)`);
                     }
 
                     // Crear el nuevo responsable con modo="proceso" si hay uno nuevo
@@ -437,10 +410,8 @@ export const updateProceso = async (req: Request, res: Response) => {
                             },
                             update: {} // No actualizar nada si ya existe
                         });
-                        console.log(`[BACKEND] updateProceso - Creado/actualizado responsable (usuarioId: ${nuevoResponsableId}, modo: proceso)`);
                     }
                 } catch (error) {
-                    console.error('[BACKEND] Error sincronizando ProcesoResponsable:', error);
                     // No fallar la actualización del proceso si falla esto
                 }
             }
@@ -470,38 +441,31 @@ export const updateProceso = async (req: Request, res: Response) => {
                     )
                 );
 
-                console.log(`[BACKEND] updateProceso - Actualizados ${riesgos.length} numeroIdentificacion de riesgos con nueva sigla: ${nuevaSigla}`);
             } catch (error) {
-                console.error('[BACKEND] Error actualizando numeroIdentificacion de riesgos:', error);
                 // No fallar la actualización del proceso si falla la actualización de riesgos
             }
         }
 
         res.json(proceso);
     } catch (error) {
-        console.error('[BACKEND] Error in updateProceso:', error);
         res.status(500).json({ error: 'Error updating proceso' });
     }
 };
 
 export const deleteProceso = async (req: Request, res: Response) => {
     const id = Number(req.params.id);
-    console.log(`[BACKEND] deleteProceso - id: ${id}`);
     try {
         await prisma.proceso.delete({ where: { id } });
-        
-        // OPTIMIZADO: Invalidar caché de procesos
         await redisSet('procesos:all', null, 0);
         await redisSet(`proceso:${id}`, null, 0);
-        
         res.json({ message: 'Proceso deleted' });
     } catch (error) {
-        console.error('[BACKEND] Error in deleteProceso:', error);
-        res.status(500).json({ error: 'Error deleting proceso' });
+        const msg = getDeleteErrorMessage(error, 'proceso', 'riesgos, evaluaciones, responsables o asignaciones');
+        const status = (error as any)?.code === 'P2025' ? 404 : (error as any)?.code === 'P2003' ? 400 : 500;
+        res.status(status).json({ error: msg });
     }
 };
 export const bulkUpdateProcesos = async (req: Request, res: Response) => {
-    console.log('[BACKEND] bulkUpdateProcesos - body:', JSON.stringify(req.body, null, 2));
     const procesos = req.body;
     try {
         if (!Array.isArray(procesos)) {
@@ -535,8 +499,6 @@ export const bulkUpdateProcesos = async (req: Request, res: Response) => {
                 if (p.objetivo !== undefined) updateData.objetivo = p.objetivo;
                 if (p.tipo !== undefined) updateData.tipo = p.tipo;
                 if (p.estado !== undefined) updateData.estado = p.estado;
-                
-                console.log(`[BACKEND] Updating proceso ${p.id} with:`, updateData);
                 
                 const procesoActualizado = await prisma.proceso.update({
                     where: { id: Number(p.id) },
@@ -574,9 +536,7 @@ export const bulkUpdateProcesos = async (req: Request, res: Response) => {
                                 update: {}
                             });
                         }
-                    } catch (error) {
-                        console.error(`[BACKEND] Error sincronizando ProcesoResponsable para proceso ${p.id}:`, error);
-                    }
+                    } catch (error) {}
                 }
 
                 return procesoActualizado;
@@ -584,7 +544,6 @@ export const bulkUpdateProcesos = async (req: Request, res: Response) => {
         );
         res.json(updated);
     } catch (error) {
-        console.error('[BACKEND] Error in bulkUpdateProcesos:', error);
         res.status(500).json({
             error: 'Error updating procesos',
             details: error instanceof Error ? error.message : String(error)
@@ -594,7 +553,6 @@ export const bulkUpdateProcesos = async (req: Request, res: Response) => {
 
 export const duplicateProceso = async (req: Request, res: Response) => {
     const id = Number(req.params.id);
-    console.log(`[BACKEND] duplicateProceso - id: ${id}`);
     const { overrides } = req.body;
     try {
         const original = await prisma.proceso.findUnique({
@@ -614,7 +572,6 @@ export const duplicateProceso = async (req: Request, res: Response) => {
         });
         res.json(duplicado);
     } catch (error) {
-        console.error('[BACKEND] Error in duplicateProceso:', error);
         res.status(500).json({ error: 'Error duplicating proceso' });
     }
 };

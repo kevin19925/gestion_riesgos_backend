@@ -1,54 +1,64 @@
-name: Deploy Empresa
+# =============================================================================
+# Deploy Backend - Gestión de Riesgos
+# Rama: main. Cada push a main despliega en el servidor vía SSH + Docker.
+# Las notificaciones de éxito/fallo las envía GitHub automáticamente al correo
+# de tu cuenta (sin configurar nada más).
+# =============================================================================
+
+name: Deploy Backend
+
 on:
   push:
-    branches: [ main ]
+    branches: [main]
 
 jobs:
   deploy:
+    name: Deploy to server
     runs-on: ubuntu-latest
+    timeout-minutes: 20
+
     steps:
-      - name: Checkout code
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Deploy to Azure via SSH
+      - name: Deploy via SSH
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script_stop: true
           script: |
-            # 1. Crear carpeta si no existe y entrar
-            mkdir -p ~/app-empresa
-            cd ~/app-empresa
+            set -e
+            export DEPLOY_DIR="$HOME/app-empresa"
+            mkdir -p "$DEPLOY_DIR"
+            cd "$DEPLOY_DIR"
 
-            # 2. Configurar Git para que confíe en la carpeta (evita errores de permisos)
-            git config --global --add safe.directory /home/${{ secrets.SSH_USER }}/app-empresa
+            git config --global --add safe.directory "$DEPLOY_DIR" 2>/dev/null || true
 
-            # 3. Actualizar el código de forma forzada
             if [ ! -d ".git" ]; then
-              git clone https://github.com/${{ github.repository }}.git .
+              git clone --branch main https://github.com/${{ github.repository }}.git .
             else
               git fetch origin main
               git reset --hard origin/main
+              git checkout main
             fi
 
-            # 4. Inyectar el archivo .env desde los Secrets de GitHub
-            # Asegúrate de haber creado el secret "DOTENV_FILE" en GitHub
             echo "${{ secrets.DOTENV_FILE }}" > .env
 
-            # 5. Detener contenedores actuales
-            docker compose down || docker-compose down || true
-            
-            # 6. Limpiar caché de Docker para forzar reconstrucción
-            docker builder prune -f || true
-            
-            # 7. Reconstruir sin caché y levantar
+            docker compose down --remove-orphans 2>/dev/null || docker-compose down --remove-orphans 2>/dev/null || true
+
             docker compose build --no-cache || docker-compose build --no-cache
+
             docker compose up -d || docker-compose up -d
-            
-            # 8. Ejecutar migraciones de Prisma dentro del contenedor
-            sleep 5  # Esperar a que el contenedor esté listo
-            docker compose exec -T app npx prisma migrate deploy || docker-compose exec -T app npx prisma migrate deploy || echo "Migraciones no ejecutadas - verificar manualmente"
-            
-            # 9. Limpieza de imágenes huérfanas para no llenar el disco de la VM
-            docker image prune -f
+
+            sleep 8
+            for i in 1 2 3 4 5; do
+              if docker compose exec -T app npx prisma migrate deploy 2>/dev/null; then
+                break
+              fi
+              [ "$i" -eq 5 ] && true
+              sleep 3
+            done
+
+            docker image prune -f 2>/dev/null || true

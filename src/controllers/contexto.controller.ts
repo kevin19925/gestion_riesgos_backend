@@ -32,7 +32,6 @@ export const getContextoByProceso = async (req: Request, res: Response) => {
     
     res.json(contexto);
   } catch (error) {
-    console.error('[BACKEND] Error in getContextoByProceso:', error);
     res.status(500).json({ error: 'Error fetching contexto' });
   }
 };
@@ -51,7 +50,6 @@ export const getContextoById = async (req: Request, res: Response) => {
     
     res.json(contexto);
   } catch (error) {
-    console.error('[BACKEND] Error in getContextoById:', error);
     res.status(500).json({ error: 'Error fetching contexto' });
   }
 };
@@ -86,7 +84,6 @@ export const createContexto = async (req: Request, res: Response) => {
     
     res.status(201).json(contexto);
   } catch (error) {
-    console.error('[BACKEND] Error in createContexto:', error);
     res.status(500).json({ error: 'Error creating contexto' });
   }
 };
@@ -112,7 +109,6 @@ export const updateContexto = async (req: Request, res: Response) => {
     if ((error as any).code === 'P2025') {
       return res.status(404).json({ error: 'Contexto not found' });
     }
-    console.error('[BACKEND] Error in updateContexto:', error);
     res.status(500).json({ error: 'Error updating contexto' });
   }
 };
@@ -130,7 +126,6 @@ export const deleteContexto = async (req: Request, res: Response) => {
     if ((error as any).code === 'P2025') {
       return res.status(404).json({ error: 'Contexto not found' });
     }
-    console.error('[BACKEND] Error in deleteContexto:', error);
     res.status(500).json({ error: 'Error deleting contexto' });
   }
 };
@@ -152,7 +147,6 @@ export const getContextoResumen = async (req: Request, res: Response) => {
     
     res.json(resumen);
   } catch (error) {
-    console.error('[BACKEND] Error in getContextoResumen:', error);
     res.status(500).json({ error: 'Error fetching contexto resumen' });
   }
 };

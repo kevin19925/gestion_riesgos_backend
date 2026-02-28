@@ -37,7 +37,6 @@ export const getResponsablesByProceso = async (req: Request, res: Response) => {
             createdAt: r.createdAt
         })));
     } catch (error) {
-        console.error('[BACKEND] Error in getResponsablesByProceso:', error);
         res.status(500).json({ error: 'Error fetching responsables' });
     }
 };
@@ -110,7 +109,6 @@ export const addResponsableToProceso = async (req: Request, res: Response) => {
             createdAt: procesoResponsable.createdAt
         });
     } catch (error: any) {
-        console.error('[BACKEND] Error in addResponsableToProceso:', error);
         if (error.code === 'P2002') {
             return res.status(409).json({ error: 'El usuario ya es responsable de este proceso en este modo' });
         }
@@ -144,7 +142,6 @@ export const removeResponsableFromProceso = async (req: Request, res: Response) 
         
         res.json({ message: 'Responsable eliminado correctamente' });
     } catch (error: any) {
-        console.error('[BACKEND] Error in removeResponsableFromProceso:', error);
         if (error.code === 'P2025') {
             return res.status(404).json({ error: 'Responsable no encontrado' });
         }
@@ -161,10 +158,6 @@ export const updateResponsablesProceso = async (req: Request, res: Response) => 
     try {
         const procesoId = Number(req.params.procesoId);
         const { responsables, responsablesIds } = req.body;
-        
-        console.log(`[BACKEND] updateResponsablesProceso - Proceso ${procesoId}`);
-        console.log('[BACKEND] Body recibido:', JSON.stringify(req.body, null, 2));
-        console.log('[BACKEND] Headers:', JSON.stringify(req.headers, null, 2));
         
         // Verificar que el proceso existe
         const proceso = await prisma.proceso.findUnique({
@@ -225,7 +218,6 @@ export const updateResponsablesProceso = async (req: Request, res: Response) => 
             } else if (['director', 'proceso'].includes(responsableData.modo)) {
                 responsablesExpandidos.push(responsableData);
             } else {
-                console.log('[BACKEND] Modo inválido:', responsableData.modo);
                 return res.status(400).json({ 
                     error: 'Cada responsable debe tener modo "director", "proceso" o "ambos"',
                     responsableInvalido: responsableData
@@ -278,9 +270,6 @@ export const updateResponsablesProceso = async (req: Request, res: Response) => 
             createdAt: r.createdAt
         })));
     } catch (error: any) {
-        console.error('[BACKEND] Error in updateResponsablesProceso:', error);
-        console.error('[BACKEND] Error stack:', error?.stack);
-        console.error('[BACKEND] Error message:', error?.message);
         res.status(500).json({ 
             error: 'Error al actualizar responsables',
             details: error?.message || String(error),

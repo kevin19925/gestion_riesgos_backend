@@ -38,7 +38,6 @@ export const getControlesByRiesgo = async (req: Request, res: Response) => {
     
     res.json(controles);
   } catch (error) {
-    console.error('[BACKEND] Error in getControlesByRiesgo:', error);
     res.status(500).json({ error: 'Error fetching controles' });
   }
 };
@@ -57,7 +56,6 @@ export const getControlById = async (req: Request, res: Response) => {
     
     res.json(control);
   } catch (error) {
-    console.error('[BACKEND] Error in getControlById:', error);
     res.status(500).json({ error: 'Error fetching control' });
   }
 };
@@ -105,17 +103,8 @@ export const createControl = async (req: Request, res: Response) => {
         clasificacionResidual
       }
     });
-    
-    console.log('[BACKEND] Control created with automatic calculations:', {
-      id: control.id,
-      efectividad: control.efectividad,
-      riesgoResidual: control.riesgoResidual,
-      clasificacionResidual: control.clasificacionResidual
-    });
-    
     res.status(201).json(control);
   } catch (error) {
-    console.error('[BACKEND] Error in createControl:', error);
     res.status(500).json({ error: 'Error creating control' });
   }
 };
@@ -171,17 +160,8 @@ export const updateControl = async (req: Request, res: Response) => {
         clasificacionResidual: nuevoClasificacion
       }
     });
-    
-    console.log('[BACKEND] Control updated with recalculation:', {
-      id: control.id,
-      efectividad: control.efectividad,
-      riesgoResidual: control.riesgoResidual,
-      clasificacionResidual: control.clasificacionResidual
-    });
-    
     res.json(control);
   } catch (error) {
-    console.error('[BACKEND] Error in updateControl:', error);
     res.status(500).json({ error: 'Error updating control' });
   }
 };
@@ -196,11 +176,10 @@ export const deleteControl = async (req: Request, res: Response) => {
     
     res.json({ message: 'Control deleted successfully' });
   } catch (error) {
-    if ((error as any).code === 'P2025') {
-      return res.status(404).json({ error: 'Control not found' });
-    }
-    console.error('[BACKEND] Error in deleteControl:', error);
-    res.status(500).json({ error: 'Error deleting control' });
+    const e = error as any;
+    if (e?.code === 'P2025') return res.status(404).json({ error: 'No se encontró el control o ya fue eliminado.' });
+    if (e?.code === 'P2003') return res.status(400).json({ error: 'No se puede eliminar el control porque tiene registros asociados.' });
+    res.status(500).json({ error: 'Error al eliminar el control' });
   }
 };
 
@@ -234,7 +213,6 @@ export const getEfectividadPromedio = async (req: Request, res: Response) => {
       }))
     });
   } catch (error) {
-    console.error('[BACKEND] Error in getEfectividadPromedio:', error);
     res.status(500).json({ error: 'Error fetching efectividad' });
   }
 };

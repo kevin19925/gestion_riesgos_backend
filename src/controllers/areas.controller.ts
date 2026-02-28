@@ -2,7 +2,6 @@ import { Request, Response } from 'express';
 import prisma from '../prisma';
 
 export const getAreas = async (req: Request, res: Response) => {
-    console.log('[BACKEND] getAreas');
     try {
         const areas = await prisma.area.findMany({
             include: { director: true }
@@ -14,14 +13,12 @@ export const getAreas = async (req: Request, res: Response) => {
         }));
         res.json(transformed);
     } catch (error) {
-        console.error('[BACKEND] Error in getAreas:', error);
         res.status(500).json({ error: 'Error fetching areas' });
     }
 };
 
 export const getAreaById = async (req: Request, res: Response) => {
     const id = Number(req.params.id);
-    console.log(`[BACKEND] getAreaById - id: ${id}`);
     try {
         const area = await prisma.area.findUnique({
             where: { id },
@@ -33,13 +30,11 @@ export const getAreaById = async (req: Request, res: Response) => {
             directorNombre: area.director?.nombre
         });
     } catch (error) {
-        console.error('[BACKEND] Error in getAreaById:', error);
         res.status(500).json({ error: 'Error fetching area' });
     }
 };
 
 export const createArea = async (req: Request, res: Response) => {
-    console.log('[BACKEND] createArea - body:', JSON.stringify(req.body, null, 2));
     try {
         const area = await prisma.area.create({
             data: {
@@ -48,15 +43,16 @@ export const createArea = async (req: Request, res: Response) => {
             }
         });
         res.status(201).json(area);
-    } catch (error) {
-        console.error('[BACKEND] Error creating area:', error);
-        res.status(500).json({ error: 'Error creating area' });
+    } catch (error: any) {
+        if (error?.code === 'P2002') {
+            return res.status(409).json({ error: 'No se puede crear el área: ya existe una con el mismo nombre.' });
+        }
+        res.status(500).json({ error: 'Error al crear el área' });
     }
 };
 
 export const updateArea = async (req: Request, res: Response) => {
     const id = Number(req.params.id);
-    console.log(`[BACKEND] updateArea - id: ${id}, body:`, JSON.stringify(req.body, null, 2));
     try {
         const data = { ...req.body };
         if (data.directorId) data.directorId = Number(data.directorId);
@@ -66,22 +62,31 @@ export const updateArea = async (req: Request, res: Response) => {
             data
         });
         res.json(area);
-    } catch (error) {
-        console.error('[BACKEND] Error updating area:', error);
-        res.status(500).json({ error: 'Error updating area' });
+    } catch (error: any) {
+        if (error?.code === 'P2025') {
+            return res.status(404).json({ error: 'Área no encontrada' });
+        }
+        if (error?.code === 'P2002') {
+            return res.status(409).json({ error: 'No se puede actualizar: ya existe otra área con el mismo nombre.' });
+        }
+        res.status(500).json({ error: 'Error al actualizar el área' });
     }
 };
 
 export const deleteArea = async (req: Request, res: Response) => {
     const id = Number(req.params.id);
-    console.log(`[BACKEND] deleteArea - id: ${id}`);
     try {
         await prisma.area.delete({
             where: { id }
         });
         res.status(204).send();
-    } catch (error) {
-        console.error('[BACKEND] Error deleting area:', error);
-        res.status(500).json({ error: 'Error deleting area' });
+    } catch (error: any) {
+        if (error?.code === 'P2025') {
+            return res.status(404).json({ error: 'Área no encontrada' });
+        }
+        if (error?.code === 'P2003') {
+            return res.status(400).json({ error: 'No se puede eliminar el área: tiene procesos asociados.' });
+        }
+        res.status(500).json({ error: 'Error al eliminar el área' });
     }
 };

@@ -24,12 +24,7 @@ export const getIncidencias = async (req: Request, res: Response) => {
 
     if (cacheKeyBase) {
       const cached = await redisGet<any[]>(cacheKeyBase);
-      if (cached) {
-        if (process.env.NODE_ENV === 'development') {
-          console.log('[BACKEND][CACHE] getIncidencias HIT', cacheKeyBase);
-        }
-        return res.json(cached);
-      }
+      if (cached) return res.json(cached);
     }
 
     const incidencias = await prisma.incidencia.findMany({
@@ -44,13 +39,12 @@ export const getIncidencias = async (req: Request, res: Response) => {
     });
 
     if (cacheKeyBase) {
-      // TTL corto (60s) para evitar datos viejos
-      await redisSet(cacheKeyBase, incidencias, 60);
+      // TTL 2 min para reducir carga y que la página no se cuelgue al recargar
+      await redisSet(cacheKeyBase, incidencias, 120);
     }
 
     res.json(incidencias);
   } catch (error) {
-    console.error('[BACKEND] Error in getIncidencias:', error);
     res.status(500).json({ error: 'Error fetching incidencias' });
   }
 };
@@ -71,7 +65,6 @@ export const getIncidenciasByRiesgo = async (req: Request, res: Response) => {
 
     res.json(incidencias);
   } catch (error) {
-    console.error('[BACKEND] Error in getIncidenciasByRiesgo:', error);
     res.status(500).json({ error: 'Error fetching incidencias' });
   }
 };
@@ -95,7 +88,6 @@ export const getIncidenciaById = async (req: Request, res: Response) => {
     
     res.json(incidencia);
   } catch (error) {
-    console.error('[BACKEND] Error in getIncidenciaById:', error);
     res.status(500).json({ error: 'Error fetching incidencia' });
   }
 };
@@ -145,7 +137,6 @@ export const createIncidencia = async (req: Request, res: Response) => {
     
     res.status(201).json(incidencia);
   } catch (error) {
-    console.error('[BACKEND] Error in createIncidencia:', error);
     res.status(500).json({ error: 'Error creating incidencia' });
   }
 };
@@ -189,7 +180,6 @@ export const updateIncidencia = async (req: Request, res: Response) => {
     
     res.json(incidencia);
   } catch (error) {
-    console.error('[BACKEND] Error in updateIncidencia:', error);
     res.status(500).json({ error: 'Error updating incidencia' });
   }
 };
@@ -204,11 +194,10 @@ export const deleteIncidencia = async (req: Request, res: Response) => {
     
     res.json({ message: 'Incidencia deleted successfully' });
   } catch (error) {
-    if ((error as any).code === 'P2025') {
-      return res.status(404).json({ error: 'Incidencia not found' });
-    }
-    console.error('[BACKEND] Error in deleteIncidencia:', error);
-    res.status(500).json({ error: 'Error deleting incidencia' });
+    const e = error as any;
+    if (e?.code === 'P2025') return res.status(404).json({ error: 'No se encontró la incidencia o ya fue eliminada.' });
+    if (e?.code === 'P2003') return res.status(400).json({ error: 'No se puede eliminar la incidencia porque tiene registros asociados.' });
+    res.status(500).json({ error: 'Error al eliminar la incidencia' });
   }
 };
 
@@ -234,7 +223,6 @@ export const getIncidenciasByPeriodo = async (req: Request, res: Response) => {
     
     res.json(incidencias);
   } catch (error) {
-    console.error('[BACKEND] Error in getIncidenciasByPeriodo:', error);
     res.status(500).json({ error: 'Error fetching incidencias by periodo' });
   }
 };
@@ -273,7 +261,6 @@ export const getIncidenciasEstadisticas = async (req: Request, res: Response) =>
     
     res.json(estadisticas);
   } catch (error) {
-    console.error('[BACKEND] Error in getIncidenciasEstadisticas:', error);
     res.status(500).json({ error: 'Error fetching incidencias estadisticas' });
   }
 };

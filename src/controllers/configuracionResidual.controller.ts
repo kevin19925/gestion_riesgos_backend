@@ -19,7 +19,6 @@ export const getConfiguracion = async (req: Request, res: Response) => {
     const config = await getConfiguracionActiva();
     res.json(config);
   } catch (error: any) {
-    console.error('[ConfigResidual] Error al obtener configuración:', error);
     res.status(500).json({ 
       error: 'Error al obtener configuración',
       message: error.message 
@@ -45,8 +44,6 @@ export const updateConfiguracion = async (req: Request, res: Response) => {
       opcionesCriterios,
       rangosNivelRiesgo
     } = req.body;
-
-    console.log('[ConfigResidual] Actualizando configuración:', id);
 
     // Validar suma de pesos = 1.0 (100%)
     if (pesosCriterios) {
@@ -155,9 +152,6 @@ export const updateConfiguracion = async (req: Request, res: Response) => {
 
     // Invalidar caché
     invalidarCacheConfiguracion();
-
-    console.log('[ConfigResidual] Configuración actualizada exitosamente');
-
     res.json({
       success: true,
       message: 'Configuración actualizada exitosamente',
@@ -165,7 +159,6 @@ export const updateConfiguracion = async (req: Request, res: Response) => {
     });
 
   } catch (error: any) {
-    console.error('[ConfigResidual] Error al actualizar configuración:', error);
     res.status(500).json({
       error: 'Error al actualizar configuración',
       message: error.message
@@ -196,8 +189,6 @@ export const recalcularRiesgos = async (req: Request, res: Response) => {
       });
     }
 
-    console.log(`[ConfigResidual] Iniciando recálculo (preview: ${preview})...`);
-
     const resultado = await recalcularTodosLosRiesgosResiduales(preview);
 
     res.json({
@@ -207,7 +198,6 @@ export const recalcularRiesgos = async (req: Request, res: Response) => {
     });
 
   } catch (error: any) {
-    console.error('[ConfigResidual] Error al recalcular:', error);
     res.status(500).json({
       error: 'Error al recalcular riesgos',
       message: error.message

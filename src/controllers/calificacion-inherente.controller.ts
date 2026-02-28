@@ -1,14 +1,20 @@
 import { Request, Response } from 'express';
 import prisma from '../prisma';
+import { redisGet, redisSet, redisDel } from '../redisClient';
+
+const CACHE_KEY_CONFIG_ACTIVA = 'calificacion-inherente:activa';
+const CACHE_TTL_CONFIG_ACTIVA = 300; // 5 min
 
 /**
  * CALIFICACIÓN INHERENTE CONTROLLER
  * Gestiona la configuración de calificación inherente
  */
 
-// Obtener configuración activa
+// Obtener configuración activa (con caché Redis para no demorar Identificación)
 export const getConfigActiva = async (_req: Request, res: Response) => {
   try {
+    const cached = await redisGet(CACHE_KEY_CONFIG_ACTIVA);
+    if (cached) return res.json(cached);
     const config = await prisma.calificacionInherenteConfig.findFirst({
       where: { activa: true },
       include: {
@@ -29,10 +35,9 @@ export const getConfigActiva = async (_req: Request, res: Response) => {
     if (!config) {
       return res.status(404).json({ error: 'No hay configuración activa' });
     }
-
+    await redisSet(CACHE_KEY_CONFIG_ACTIVA, config, CACHE_TTL_CONFIG_ACTIVA);
     res.json(config);
   } catch (error) {
-    console.error('[BACKEND] Error in getConfigActiva:', error);
     res.status(500).json({ error: 'Error fetching active config' });
   }
 };
@@ -57,7 +62,6 @@ export const getAllConfigs = async (_req: Request, res: Response) => {
 
     res.json(configs);
   } catch (error) {
-    console.error('[BACKEND] Error in getAllConfigs:', error);
     res.status(500).json({ error: 'Error fetching configs' });
   }
 };
@@ -87,7 +91,6 @@ export const getConfigById = async (req: Request, res: Response) => {
 
     res.json(config);
   } catch (error) {
-    console.error('[BACKEND] Error in getConfigById:', error);
     res.status(500).json({ error: 'Error fetching config' });
   }
 };
@@ -153,9 +156,9 @@ export const createConfig = async (req: Request, res: Response) => {
       }
     });
 
+    await redisDel(CACHE_KEY_CONFIG_ACTIVA);
     res.status(201).json(config);
   } catch (error) {
-    console.error('[BACKEND] Error in createConfig:', error);
     res.status(500).json({ error: 'Error creating config' });
   }
 };
@@ -277,9 +280,9 @@ export const updateConfig = async (req: Request, res: Response) => {
       }
     });
 
+    await redisDel(CACHE_KEY_CONFIG_ACTIVA);
     res.json(updated);
   } catch (error) {
-    console.error('[BACKEND] Error in updateConfig:', error);
     res.status(500).json({ error: 'Error updating config' });
   }
 };
@@ -295,7 +298,6 @@ export const deleteConfig = async (req: Request, res: Response) => {
 
     res.json({ message: 'Config deleted successfully' });
   } catch (error) {
-    console.error('[BACKEND] Error in deleteConfig:', error);
     res.status(500).json({ error: 'Error deleting config' });
   }
 };
@@ -374,7 +376,6 @@ export const calcularCalificacionInherente = async (req: Request, res: Response)
       }
     });
   } catch (error) {
-    console.error('[BACKEND] Error in calcularCalificacionInherente:', error);
     res.status(500).json({ error: 'Error calculating inherent qualification' });
   }
 };

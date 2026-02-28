@@ -61,8 +61,6 @@ router.post('/archivo', uploadMiddleware, async (req: RequestWithFile, res: Resp
       });
     }
 
-    console.log(`[UPLOAD] Subiendo archivo: ${req.file.originalname} (${req.file.size} bytes)`);
-
     // Subir a Cloudinary
     const result = await new Promise<any>((resolve, reject) => {
       const uploadStream = cloudinary.uploader.upload_stream(
@@ -73,7 +71,6 @@ router.post('/archivo', uploadMiddleware, async (req: RequestWithFile, res: Resp
         },
         (error, result) => {
           if (error) {
-            console.error('[UPLOAD] Error en Cloudinary:', error);
             reject(error);
           } else {
             resolve(result);
@@ -83,8 +80,6 @@ router.post('/archivo', uploadMiddleware, async (req: RequestWithFile, res: Resp
       
       uploadStream.end(req.file.buffer);
     });
-
-    console.log(`[UPLOAD] ✅ Archivo subido exitosamente: ${result.secure_url}`);
 
     res.json({
       url: result.secure_url,
@@ -96,7 +91,6 @@ router.post('/archivo', uploadMiddleware, async (req: RequestWithFile, res: Resp
       height: result.height,
     });
   } catch (error: any) {
-    console.error('[UPLOAD] ❌ Error al subir archivo:', error);
     res.status(500).json({ 
       error: error.message || 'Error al subir el archivo' 
     });
@@ -117,19 +111,14 @@ router.delete('/archivo/:publicId', async (req, res) => {
       });
     }
 
-    console.log(`[UPLOAD] Eliminando archivo: ${publicId}`);
-
     const result = await cloudinary.uploader.destroy(publicId);
     
     if (result.result === 'ok') {
-      console.log(`[UPLOAD] ✅ Archivo eliminado: ${publicId}`);
       res.json({ success: true, message: 'Archivo eliminado exitosamente' });
     } else {
-      console.warn(`[UPLOAD] ⚠️ No se pudo eliminar el archivo: ${publicId}`);
       res.status(404).json({ error: 'Archivo no encontrado' });
     }
   } catch (error: any) {
-    console.error('[UPLOAD] ❌ Error al eliminar archivo:', error);
     res.status(500).json({ 
       error: error.message || 'Error al eliminar el archivo' 
     });

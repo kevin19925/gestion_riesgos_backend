@@ -93,7 +93,7 @@ function parseBlobUrl(blobUrl: string): { accountUrl: string; containerName: str
 export async function deleteBlobByUrl(blobUrl: string): Promise<boolean> {
   const parsed = parseBlobUrl(blobUrl);
   if (!parsed) {
-    console.warn('[AZURE_BLOB] URL no válida para eliminar:', blobUrl);
+    // URL no válida para eliminar
     return false;
   }
 

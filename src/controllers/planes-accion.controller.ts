@@ -6,27 +6,25 @@ import prisma from "../prisma";
  * Gestiona planes de acción (preventivos y reactivos)
  */
 
-export const getPlanes = async (_req: Request, res: Response) => {
+export const getPlanes = async (req: Request, res: Response) => {
   try {
-    const planes = await prisma.planAccion.findMany({
-      include: {
-        riesgo: {
-          include: {
-            proceso: true,
-          },
-        },
-        incidencia: {
-          include: {
-            proceso: true,
-          },
-        },
-      },
-      orderBy: { createdAt: "desc" },
-    });
+    const page = Math.max(1, Number(req.query.page) || 1);
+    const pageSize = Math.min(100, Math.max(1, Number(req.query.pageSize) || 20));
+    const skip = (page - 1) * pageSize;
 
-    // Mapear para incluir información del proceso en el plan
-    // Para planes preventivos (con riesgoId): obtener proceso desde riesgo
-    // Para planes reactivos (con incidenciaId): obtener proceso desde incidencia
+    const [planes, total] = await Promise.all([
+      prisma.planAccion.findMany({
+        skip,
+        take: pageSize,
+        include: {
+          riesgo: { include: { proceso: true } },
+          incidencia: { include: { proceso: true } },
+        },
+        orderBy: { createdAt: "desc" },
+      }),
+      prisma.planAccion.count(),
+    ]);
+
     const planesConProceso = planes.map((plan: any) => ({
       ...plan,
       procesoNombre:
@@ -36,10 +34,17 @@ export const getPlanes = async (_req: Request, res: Response) => {
       procesoId: plan.riesgo?.procesoId || plan.incidencia?.procesoId || null,
     }));
 
-    console.log(`[BACKEND] getPlanes - ${planes.length} planes encontrados`);
-    res.json(planesConProceso);
+    const totalPages = total ? Math.ceil(total / pageSize) : 0;
+    res.json({
+      data: planesConProceso,
+      total,
+      page,
+      pageSize,
+      totalPages,
+      hasNextPage: page < totalPages,
+      hasPreviousPage: page > 1,
+    });
   } catch (error) {
-    console.error("[BACKEND] Error in getPlanes:", error);
     res.status(500).json({ error: "Error fetching planes" });
   }
 };
@@ -47,18 +52,33 @@ export const getPlanes = async (_req: Request, res: Response) => {
 export const getPlanesByRiesgo = async (req: Request, res: Response) => {
   try {
     const riesgoId = Number(req.params.riesgoId);
+    const page = Math.max(1, Number(req.query.page) || 1);
+    const pageSize = Math.min(50, Math.max(1, Number(req.query.pageSize) || 20));
+    const skip = (page - 1) * pageSize;
 
-    const planes = await prisma.planAccion.findMany({
-      where: {
-        riesgoId,
-        incidenciaId: null, // Preventivos
-      },
-      orderBy: { createdAt: "desc" },
+    const where = { riesgoId, incidenciaId: null };
+
+    const [planes, total] = await Promise.all([
+      prisma.planAccion.findMany({
+        where,
+        skip,
+        take: pageSize,
+        orderBy: { createdAt: "desc" },
+      }),
+      prisma.planAccion.count({ where }),
+    ]);
+
+    const totalPages = total ? Math.ceil(total / pageSize) : 0;
+    res.json({
+      data: planes,
+      total,
+      page,
+      pageSize,
+      totalPages,
+      hasNextPage: page < totalPages,
+      hasPreviousPage: page > 1,
     });
-
-    res.json(planes);
   } catch (error) {
-    console.error("[BACKEND] Error in getPlanesByRiesgo:", error);
     res.status(500).json({ error: "Error fetching planes" });
   }
 };
@@ -66,18 +86,33 @@ export const getPlanesByRiesgo = async (req: Request, res: Response) => {
 export const getPlanesByIncidencia = async (req: Request, res: Response) => {
   try {
     const incidenciaId = Number(req.params.incidenciaId);
+    const page = Math.max(1, Number(req.query.page) || 1);
+    const pageSize = Math.min(50, Math.max(1, Number(req.query.pageSize) || 20));
+    const skip = (page - 1) * pageSize;
 
-    const planes = await prisma.planAccion.findMany({
-      where: {
-        incidenciaId,
-        riesgoId: null, // Reactivos
-      },
-      orderBy: { createdAt: "desc" },
+    const where = { incidenciaId, riesgoId: null };
+
+    const [planes, total] = await Promise.all([
+      prisma.planAccion.findMany({
+        where,
+        skip,
+        take: pageSize,
+        orderBy: { createdAt: "desc" },
+      }),
+      prisma.planAccion.count({ where }),
+    ]);
+
+    const totalPages = total ? Math.ceil(total / pageSize) : 0;
+    res.json({
+      data: planes,
+      total,
+      page,
+      pageSize,
+      totalPages,
+      hasNextPage: page < totalPages,
+      hasPreviousPage: page > 1,
     });
-
-    res.json(planes);
   } catch (error) {
-    console.error("[BACKEND] Error in getPlanesByIncidencia:", error);
     res.status(500).json({ error: "Error fetching planes reactivos" });
   }
 };
@@ -96,7 +131,6 @@ export const getPlanById = async (req: Request, res: Response) => {
 
     res.json(plan);
   } catch (error) {
-    console.error("[BACKEND] Error in getPlanById:", error);
     res.status(500).json({ error: "Error fetching plan" });
   }
 };
@@ -155,7 +189,6 @@ export const createPlan = async (req: Request, res: Response) => {
 
     res.status(201).json(plan);
   } catch (error) {
-    console.error("[BACKEND] Error in createPlan:", error);
     res.status(500).json({ error: "Error creating plan" });
   }
 };
@@ -205,7 +238,6 @@ export const updatePlan = async (req: Request, res: Response) => {
     if ((error as any).code === "P2025") {
       return res.status(404).json({ error: "Plan not found" });
     }
-    console.error("[BACKEND] Error in updatePlan:", error);
     res.status(500).json({ error: "Error updating plan" });
   }
 };
@@ -220,11 +252,10 @@ export const deletePlan = async (req: Request, res: Response) => {
 
     res.json({ message: "Plan deleted successfully" });
   } catch (error) {
-    if ((error as any).code === "P2025") {
-      return res.status(404).json({ error: "Plan not found" });
-    }
-    console.error("[BACKEND] Error in deletePlan:", error);
-    res.status(500).json({ error: "Error deleting plan" });
+    const e = error as any;
+    if (e?.code === "P2025") return res.status(404).json({ error: "No se encontró el plan de acción o ya fue eliminado." });
+    if (e?.code === "P2003") return res.status(400).json({ error: "No se puede eliminar el plan porque tiene tareas asociadas." });
+    res.status(500).json({ error: "Error al eliminar el plan de acción" });
   }
 };
 
@@ -243,7 +274,6 @@ export const getPlanesVencidos = async (req: Request, res: Response) => {
 
     res.json(planes);
   } catch (error) {
-    console.error("[BACKEND] Error in getPlanesVencidos:", error);
     res.status(500).json({ error: "Error fetching planes vencidos" });
   }
 };
@@ -266,7 +296,6 @@ export const getPlanesEstadisticas = async (req: Request, res: Response) => {
 
     res.json(estadisticas);
   } catch (error) {
-    console.error("[BACKEND] Error in getPlanesEstadisticas:", error);
     res.status(500).json({ error: "Error fetching estadisticas" });
   }
 };

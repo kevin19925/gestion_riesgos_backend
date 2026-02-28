@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import prisma from '../prisma';
+import { getDeleteErrorMessage } from '../utils/prismaErrors';
 
 export const getGerencias = async (req: Request, res: Response) => {
     try {
@@ -30,7 +31,6 @@ export const createGerencia = async (req: Request, res: Response) => {
         });
         res.status(201).json(gerencia);
     } catch (error) {
-        console.error('Error creating gerencia:', error);
         res.status(500).json({ error: 'Error creating gerencia' });
     }
 };
@@ -51,11 +51,11 @@ export const updateGerencia = async (req: Request, res: Response) => {
 export const deleteGerencia = async (req: Request, res: Response) => {
     const id = Number(req.params.id);
     try {
-        await prisma.gerencia.delete({
-            where: { id }
-        });
+        await prisma.gerencia.delete({ where: { id } });
         res.status(204).send();
     } catch (error) {
-        res.status(500).json({ error: 'Error deleting gerencia' });
+        const msg = getDeleteErrorMessage(error, 'gerencia', 'usuarios o cargos asociados');
+        const status = (error as any)?.code === 'P2025' ? 404 : (error as any)?.code === 'P2003' ? 400 : 500;
+        res.status(status).json({ error: msg });
     }
 };

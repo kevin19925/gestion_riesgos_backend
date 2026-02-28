@@ -4,10 +4,6 @@ import { redisGet, redisSet } from '../redisClient';
 
 export const getRiesgos = async (req: Request, res: Response) => {
     const { procesoId, clasificacion, busqueda, page, pageSize, zona, includeCausas } = req.query;
-    // OPTIMIZADO: Reducir logging en producción para mejor rendimiento
-    if (process.env.NODE_ENV === 'development') {
-        console.log('[BACKEND] getRiesgos - query:', JSON.stringify(req.query, null, 2));
-    }
     const where: any = {};
     if (procesoId) {
         const parsedProcesoId = Number(procesoId);
@@ -46,12 +42,7 @@ export const getRiesgos = async (req: Request, res: Response) => {
 
         if (cacheKey) {
             const cached = await redisGet<any>(cacheKey);
-            if (cached) {
-                if (process.env.NODE_ENV === 'development') {
-                    console.log('[BACKEND][CACHE] getRiesgos HIT', cacheKey);
-                }
-                return res.json(cached);
-            }
+            if (cached) return res.json(cached);
         }
 
         // OPTIMIZADO: Include simple - Prisma permite select en el nivel superior
@@ -129,13 +120,6 @@ export const getRiesgos = async (req: Request, res: Response) => {
 
         res.json(payload);
     } catch (error: any) {
-        console.error('[BACKEND] Error in getRiesgos:', error);
-        console.error('[BACKEND] Error stack:', error?.stack);
-        console.error('[BACKEND] Error details:', {
-            message: error?.message,
-            code: error?.code,
-            meta: error?.meta
-        });
         res.status(500).json({ 
             error: 'Error fetching riesgos',
             message: error?.message || 'Unknown error',
@@ -146,8 +130,6 @@ export const getRiesgos = async (req: Request, res: Response) => {
 
 export const getRiesgoById = async (req: Request, res: Response) => {
     const id = Number(req.params.id);
-    console.log(`[BACKEND] getRiesgoById - id: ${id}`);
-    
     // Validar que el ID sea un número válido
     if (isNaN(id) || id <= 0) {
         return res.status(400).json({ error: 'Invalid riesgo ID' });
@@ -157,12 +139,7 @@ export const getRiesgoById = async (req: Request, res: Response) => {
         // OPTIMIZADO: Caché por riesgo individual
         const cacheKey = `riesgo:${id}`;
         const cached = await redisGet<any>(cacheKey);
-        if (cached) {
-            if (process.env.NODE_ENV === 'development') {
-                console.log('[BACKEND][CACHE] getRiesgoById HIT', cacheKey);
-            }
-            return res.json(cached);
-        }
+        if (cached) return res.json(cached);
 
         // OPTIMIZADO: Usar select específico y limitar causas
         const riesgo = await prisma.riesgo.findUnique({
@@ -242,13 +219,11 @@ export const getRiesgoById = async (req: Request, res: Response) => {
         
         res.json(riesgo);
     } catch (error) {
-        console.error('[BACKEND] Error in getRiesgoById:', error);
         res.status(500).json({ error: 'Error fetching riesgo' });
     }
 };
 
 export const createRiesgo = async (req: Request, res: Response) => {
-    console.log('[BACKEND] createRiesgo - body:', JSON.stringify(req.body, null, 2));
     const { evaluacion, causas, priorizacion, ...riesgoData } = req.body;
 
     try {
@@ -269,10 +244,24 @@ export const createRiesgo = async (req: Request, res: Response) => {
             numero: Number(riesgoData.numero)
         };
 
-        // Create evaluation data if provided
-        if (evaluacion) {
+        // Create evaluation data if provided (normalize Int/String for Prisma)
+        if (evaluacion && typeof evaluacion === 'object') {
+            const e = evaluacion as Record<string, unknown>;
             data.evaluacion = {
-                create: evaluacion
+                create: {
+                    impactoPersonas: Number(e.impactoPersonas) || 1,
+                    impactoLegal: Number(e.impactoLegal) || 1,
+                    impactoAmbiental: Number(e.impactoAmbiental) || 1,
+                    impactoProcesos: Number(e.impactoProcesos) || 1,
+                    impactoReputacion: Number(e.impactoReputacion) || 1,
+                    impactoEconomico: Number(e.impactoEconomico) || 1,
+                    impactoTecnologico: Number(e.impactoTecnologico) || 1,
+                    probabilidad: Number(e.probabilidad) || 1,
+                    impactoGlobal: Math.round(Number(e.impactoGlobal) || 0),
+                    impactoMaximo: Number(e.impactoMaximo) || 1,
+                    riesgoInherente: Math.round(Number(e.riesgoInherente) || 0),
+                    nivelRiesgo: String(e.nivelRiesgo ?? 'Sin Calificar')
+                }
             };
         }
 
@@ -303,8 +292,6 @@ export const createRiesgo = async (req: Request, res: Response) => {
         
         res.json(nuevoRiesgo);
     } catch (error: any) {
-        console.error('[BACKEND] Error in createRiesgo:', error);
-        
         // Handle unique constraint violations
         if (error.code === 'P2002') {
             const field = error.meta?.target?.[0] || 'unknown';
@@ -328,7 +315,6 @@ export const createRiesgo = async (req: Request, res: Response) => {
 
 export const updateRiesgo = async (req: Request, res: Response) => {
     const id = Number(req.params.id);
-    console.log(`[BACKEND] updateRiesgo - id: ${id}, body:`, JSON.stringify(req.body, null, 2));
     let { evaluacion, causas, priorizacion, ...data } = req.body;
     try {
         if (data.procesoId) data.procesoId = Number(data.procesoId);
@@ -346,8 +332,6 @@ export const updateRiesgo = async (req: Request, res: Response) => {
                 evaluacionUpdate[field] = evaluacion[field];
             }
         });
-        
-        console.log('[BACKEND] updateRiesgo - evaluacionUpdate:', JSON.stringify(evaluacionUpdate, null, 2));
 
         const updated = await prisma.riesgo.update({
             where: { id },
@@ -365,37 +349,19 @@ export const updateRiesgo = async (req: Request, res: Response) => {
             if (existingEval) {
                 // Actualizar evaluación existente
                 // NOTA: No establecer updatedAt manualmente, Prisma lo maneja automáticamente con @updatedAt
-                const evaluacionActualizada = await prisma.evaluacionRiesgo.update({
+                await prisma.evaluacionRiesgo.update({
                     where: { riesgoId: id },
                     data: { 
                         ...evaluacionUpdate
                     }
                 });
-                console.log('[BACKEND] Evaluacion actualizada:', {
-                    riesgoId: id,
-                    riesgoInherente: evaluacionActualizada.riesgoInherente,
-                    nivelRiesgo: evaluacionActualizada.nivelRiesgo,
-                    probabilidad: evaluacionActualizada.probabilidad,
-                    impactoGlobal: evaluacionActualizada.impactoGlobal,
-                    riesgoResidual: evaluacionActualizada.riesgoResidual,
-                    probabilidadResidual: evaluacionActualizada.probabilidadResidual,
-                    impactoResidual: evaluacionActualizada.impactoResidual,
-                    nivelRiesgoResidual: evaluacionActualizada.nivelRiesgoResidual
-                });
             } else {
                 // Crear nueva evaluación si no existe
-                const nuevaEvaluacion = await prisma.evaluacionRiesgo.create({
+                await prisma.evaluacionRiesgo.create({
                     data: {
                         riesgoId: id,
                         ...evaluacionUpdate
                     }
-                });
-                console.log('[BACKEND] Nueva evaluación creada:', {
-                    riesgoId: id,
-                    riesgoInherente: nuevaEvaluacion.riesgoInherente,
-                    nivelRiesgo: nuevaEvaluacion.nivelRiesgo,
-                    probabilidad: nuevaEvaluacion.probabilidad,
-                    impactoGlobal: nuevaEvaluacion.impactoGlobal
                 });
             }
         }
@@ -407,7 +373,6 @@ export const updateRiesgo = async (req: Request, res: Response) => {
         const seActualizaronImpactos = evaluacionUpdate && camposImpacto.some(campo => evaluacionUpdate[campo] !== undefined);
         
         if (seActualizaronImpactos) {
-            console.log(`[BACKEND] Se actualizaron impactos para riesgo ${id}, recalculando automáticamente...`);
             await recalcularRiesgoInherenteDesdeCausas(id);
         }
 
@@ -419,14 +384,12 @@ export const updateRiesgo = async (req: Request, res: Response) => {
 
         res.json(updated);
     } catch (error) {
-        console.error('[BACKEND] Error in updateRiesgo:', error);
         res.status(500).json({ error: 'Error updating riesgo' });
     }
 };
 
 export const deleteRiesgo = async (req: Request, res: Response) => {
     const id = Number(req.params.id);
-    console.log(`[BACKEND] deleteRiesgo - id: ${id}`);
     try {
         // Obtener procesoId antes de eliminar para invalidar caché
         const riesgo = await prisma.riesgo.findUnique({
@@ -444,14 +407,15 @@ export const deleteRiesgo = async (req: Request, res: Response) => {
         
         res.json({ message: 'Riesgo deleted' });
     } catch (error) {
-        console.error('[BACKEND] Error in deleteRiesgo:', error);
-        res.status(500).json({ error: 'Error deleting riesgo' });
+        const e = error as any;
+        if (e?.code === 'P2025') return res.status(404).json({ error: 'No se encontró el riesgo o ya fue eliminado.' });
+        if (e?.code === 'P2003') return res.status(400).json({ error: 'No se puede eliminar el riesgo porque tiene causas, controles o evaluaciones asociados.' });
+        res.status(500).json({ error: 'Error al eliminar el riesgo' });
     }
 };
 
 export const getEvaluacionByRiesgoId = async (req: Request, res: Response) => {
     const riesgoId = Number(req.params.riesgoId);
-    console.log(`[BACKEND] getEvaluacionByRiesgoId - riesgoId: ${riesgoId}`);
     try {
         const evaluacion = await prisma.evaluacionRiesgo.findUnique({
             where: { riesgoId }
@@ -459,24 +423,17 @@ export const getEvaluacionByRiesgoId = async (req: Request, res: Response) => {
         // mock returns array? evaluate one
         res.json(evaluacion ? [evaluacion] : []);
     } catch (error) {
-        console.error('[BACKEND] Error in getEvaluacionByRiesgoId:', error);
         res.status(500).json({ error: 'Error fetching evaluacion' });
     }
 };
 
 export const getEstadisticas = async (req: Request, res: Response) => {
     const { procesoId } = req.query;
-    console.log(`[BACKEND] getEstadisticas - procesoId: ${procesoId}`);
     try {
         // OPTIMIZADO: Caché por proceso
         const cacheKey = procesoId ? `estadisticas:proceso:${procesoId}` : 'estadisticas:all';
         const cached = await redisGet<any>(cacheKey);
-        if (cached) {
-            if (process.env.NODE_ENV === 'development') {
-                console.log('[BACKEND][CACHE] getEstadisticas HIT', cacheKey);
-            }
-            return res.json(cached);
-        }
+        if (cached) return res.json(cached);
 
         const where: any = {};
         if (procesoId) where.procesoId = Number(procesoId);
@@ -514,14 +471,12 @@ export const getEstadisticas = async (req: Request, res: Response) => {
 
         res.json(stats);
     } catch (error) {
-        console.error('[BACKEND] Error in getEstadisticas:', error);
         res.status(500).json({ error: 'Error calculating stats' });
     }
 };
 
 export const getRiesgosRecientes = async (req: Request, res: Response) => {
     const limit = Number(req.query.limit) || 10;
-    console.log(`[BACKEND] getRiesgosRecientes - limit: ${limit}`);
     try {
         const recientes = await prisma.riesgo.findMany({
             take: limit,
@@ -530,14 +485,12 @@ export const getRiesgosRecientes = async (req: Request, res: Response) => {
         });
         res.json(recientes);
     } catch (error) {
-        console.error('[BACKEND] Error in getRiesgosRecientes:', error);
         res.status(500).json({ error: 'Error fetching recent risks' });
     }
 };
 
 export const getPuntosMapa = async (req: Request, res: Response) => {
     const { procesoId } = req.query;
-    console.log(`[BACKEND] getPuntosMapa - procesoId: ${procesoId || 'TODOS (sin filtro)'}`);
     const where: any = {};
     // Solo filtrar por proceso si se especifica explícitamente
     if (procesoId && procesoId !== 'all' && procesoId !== 'undefined' && procesoId !== 'null') {
@@ -556,9 +509,6 @@ export const getPuntosMapa = async (req: Request, res: Response) => {
                 proceso: { select: { id: true, nombre: true, sigla: true } }
             }
         });
-        if (process.env.NODE_ENV === 'development') {
-            console.log(`[BACKEND] getPuntosMapa - ${riesgos.length} riesgos`);
-        }
 
         // Incluir TODOS los riesgos con evaluación (no filtrar por valores específicos)
         // IMPORTANTE: Solo generar UN punto por riesgo (evitar duplicados)
@@ -566,15 +516,9 @@ export const getPuntosMapa = async (req: Request, res: Response) => {
         const puntos = riesgos
             .filter(r => {
                 // Solo incluir riesgos con evaluación
-                if (!r.evaluacion) {
-                    console.warn(`[BACKEND] Riesgo ${r.id} sin evaluación, excluido del mapa`);
-                    return false;
-                }
+                if (!r.evaluacion) return false;
                 // Evitar duplicados: si este riesgo ya fue procesado, saltarlo
-                if (riesgosProcesados.has(r.id)) {
-                    console.warn(`[BACKEND] Riesgo ${r.id} duplicado, excluido`);
-                    return false;
-                }
+                if (riesgosProcesados.has(r.id)) return false;
                 // Incluir todos los riesgos con evaluación, incluso si no tienen valores perfectos
                 // El cálculo se hará después con fallbacks
                 riesgosProcesados.add(r.id);
@@ -595,8 +539,6 @@ export const getPuntosMapa = async (req: Request, res: Response) => {
                 if (riesgoInherente && riesgoInherente > 0 && !isNaN(riesgoInherente) && tieneEjesGuardados) {
                     probabilidad = Math.round(probGuardada);
                     impacto = Math.round(impGuardado);
-                    console.log(`[BACKEND] Riesgo ${r.id} (${r.numeroIdentificacion || r.id}): ` +
-                        `usando ejes guardados -> Prob(Frecuencia)=${probabilidad}, Imp(Impacto)=${impacto}`);
                 } else if (riesgoInherente && riesgoInherente > 0 && !isNaN(riesgoInherente)) {
                     // Fallback: descomponer riesgoInherente en prob×imp (puede intercambiar ejes)
                     let mejorProb = 1;
@@ -657,8 +599,6 @@ export const getPuntosMapa = async (req: Request, res: Response) => {
                     }
                     probabilidad = mejorProb;
                     impacto = mejorImp;
-                    console.log(`[BACKEND] Riesgo ${r.id} (${r.numeroIdentificacion || r.id}): ` +
-                        `riesgoInherente=${riesgoInherente} -> Prob=${probabilidad}, Imp=${impacto} (descomposición)`);
                 } else {
                     // Fallback: usar probabilidad e impactoGlobal directamente, o valores por defecto
                     const probEval = Number(r.evaluacion!.probabilidad);
@@ -740,8 +680,6 @@ export const getPuntosMapa = async (req: Request, res: Response) => {
                     
                     probabilidadResidual = mejorProbRes;
                     impactoResidual = mejorImpRes;
-                    
-                    console.log(`[BACKEND] Riesgo ${r.id}: Valores residuales desde riesgoResidual=${riesgoResidual} -> Prob=${probabilidadResidual}, Imp=${impactoResidual}`);
                 } else {
                     // PRIORIDAD 2: Si no hay riesgoResidual, usar valores residuales directos de la evaluación
                     probabilidadResidual = r.evaluacion!.probabilidadResidual 
@@ -751,17 +689,12 @@ export const getPuntosMapa = async (req: Request, res: Response) => {
                         ? Math.max(1, Math.min(5, Math.round(Number(r.evaluacion!.impactoResidual))))
                         : null;
                     
-                    if (probabilidadResidual && impactoResidual) {
-                        console.log(`[BACKEND] Riesgo ${r.id}: Valores residuales directos de evaluación - Prob=${probabilidadResidual}, Imp=${impactoResidual}`);
-                    }
                 }
                 
                 // PRIORIDAD 3: Si aún no hay valores residuales, usar inherentes
-                // (Esto es para riesgos sin controles, que deben aparecer igual en ambos mapas)
                 if (!probabilidadResidual || !impactoResidual) {
                     probabilidadResidual = probabilidad;
                     impactoResidual = impacto;
-                    console.log(`[BACKEND] Riesgo ${r.id}: Sin valores residuales, usando inherentes - Prob=${probabilidadResidual}, Imp=${impactoResidual}`);
                 }
                 
                 return {
@@ -786,22 +719,13 @@ export const getPuntosMapa = async (req: Request, res: Response) => {
                     tipologiaNivelI: r.tipologiaNivelI || null
                 };
             });
-        
-        console.log(`[BACKEND] getPuntosMapa - ${puntos.length} puntos válidos generados de ${riesgos.length} riesgos totales`);
-        
-        // Log detallado de los primeros 5 puntos para debug
-        puntos.slice(0, 5).forEach((p: any) => {
-            console.log(`[BACKEND] Punto: riesgoId=${p.riesgoId}, id=${p.numeroIdentificacion}, inherente=${p.probabilidad}-${p.impacto}, residual=${p.probabilidadResidual}-${p.impactoResidual}`);
-        });
 
         res.json(puntos);
     } catch (error) {
-        console.error('[BACKEND] Error in getPuntosMapa:', error);
         res.status(500).json({ error: 'Error fetching map points' });
     }
 };
 export const getCausas = async (req: Request, res: Response) => {
-    console.log('[BACKEND] getCausas');
     try {
         // Incluir solo causas sin controles anidados para evitar errores de columnas faltantes
         const causas = await prisma.causaRiesgo.findMany({
@@ -809,7 +733,6 @@ export const getCausas = async (req: Request, res: Response) => {
         });
         res.json(causas);
     } catch (error) {
-        console.error('[BACKEND] Error in getCausas:', error);
         res.status(500).json({ error: 'Error fetching causas' });
     }
 };
@@ -832,10 +755,7 @@ export async function recalcularRiesgoInherenteDesdeCausas(riesgoId: number): Pr
             }
         });
 
-        if (!riesgo || !riesgo.evaluacion) {
-            console.log(`[BACKEND] ⚠️ Riesgo ${riesgoId} no tiene evaluación, saltando recálculo`);
-            return;
-        }
+        if (!riesgo || !riesgo.evaluacion) return;
 
         // Si no hay causas, establecer a 0
         if (!riesgo.causas || riesgo.causas.length === 0) {
@@ -848,7 +768,6 @@ export async function recalcularRiesgoInherenteDesdeCausas(riesgoId: number): Pr
                     impactoGlobal: 1
                 }
             });
-            console.log(`[BACKEND] Riesgo ${riesgoId}: Sin causas, establecido a 0`);
             return;
         }
 
@@ -878,7 +797,7 @@ export async function recalcularRiesgoInherenteDesdeCausas(riesgoId: number): Pr
                 });
             }
         } catch (error) {
-            console.error('[BACKEND] Error obteniendo pesos de impacto, usando valores por defecto:', error);
+            // Usar valores por defecto
         }
         
         // Calcular calificación global impacto: nivel * porcentaje_decimal, sumar todos, redondear hacia arriba
@@ -1001,16 +920,12 @@ export async function recalcularRiesgoInherenteDesdeCausas(riesgoId: number): Pr
                 impactoGlobal: impactoMapa
             }
         });
-
-        console.log(`[BACKEND] ✅ Riesgo ${riesgoId}: Recalculado con config Calificación Inherente - riesgoInherente=${Math.round(calificacionInherenteGlobal)}, Prob(Frec)=${probabilidadMapa}, Imp=${impactoMapa}, Nivel=${nivelRiesgo}`);
     } catch (error) {
-        console.error(`[BACKEND] ❌ Error al recalcular riesgo ${riesgoId} desde causas:`, error);
         // No lanzar error para no interrumpir la operación principal
     }
 }
 
 export const createCausa = async (req: Request, res: Response) => {
-    console.log('[BACKEND] createCausa', req.body);
     try {
         const { riesgoId, descripcion, fuenteCausa, frecuencia, seleccionada, tipoGestion, gestion } = req.body;
         
@@ -1030,14 +945,11 @@ export const createCausa = async (req: Request, res: Response) => {
             }
         });
         
-        console.log('[BACKEND] Causa creada:', causa.id);
-        
         // Recalcular automáticamente riesgoInherente, probabilidad e impactoGlobal
         await recalcularRiesgoInherenteDesdeCausas(Number(riesgoId));
         
         res.status(201).json(causa);
     } catch (error) {
-        console.error('[BACKEND] Error in createCausa:', error);
         res.status(500).json({ error: 'Error creating causa' });
     }
 };
@@ -1049,7 +961,6 @@ export const createCausa = async (req: Request, res: Response) => {
  */
 export const updateCausa = async (req: Request, res: Response) => {
     const id = Number(req.params.id);
-    console.log('[BACKEND] updateCausa - id:', id, 'body:', req.body);
     try {
         const { tipoGestion, gestion, descripcion, fuenteCausa, frecuencia } = req.body;
         const updateData: any = {};
@@ -1067,7 +978,6 @@ export const updateCausa = async (req: Request, res: Response) => {
             where: { id },
             data: updateData
         });
-        console.log('[BACKEND] Causa actualizada:', updated.id);
         
         // Recalcular automáticamente riesgoInherente, probabilidad e impactoGlobal
         // Solo si se modificó frecuencia o si puede afectar el cálculo
@@ -1077,38 +987,31 @@ export const updateCausa = async (req: Request, res: Response) => {
         
         res.json(updated);
     } catch (error) {
-        console.error('[BACKEND] Error in updateCausa:', error);
         res.status(500).json({ error: 'Error updating causa' });
     }
 };
 
 export const deleteCausa = async (req: Request, res: Response) => {
     const id = Number(req.params.id);
-    console.log('[BACKEND] deleteCausa - id:', id, 'params:', req.params);
     try {
         // Verificar que la causa existe antes de intentar eliminarla
         const causa = await prisma.causaRiesgo.findUnique({
             where: { id }
         });
         
-        if (!causa) {
-            console.log('[BACKEND] Causa no encontrada:', id);
-            return res.status(404).json({ error: `Causa con id ${id} no encontrada` });
-        }
+        if (!causa) return res.status(404).json({ error: `Causa con id ${id} no encontrada` });
         
         const riesgoId = causa.riesgoId;
         
         await prisma.causaRiesgo.delete({
             where: { id }
         });
-        console.log('[BACKEND] Causa eliminada exitosamente:', id);
         
         // Recalcular automáticamente riesgoInherente, probabilidad e impactoGlobal
         await recalcularRiesgoInherenteDesdeCausas(riesgoId);
         
         res.json({ message: 'Causa eliminada correctamente', id });
     } catch (error: any) {
-        console.error('[BACKEND] Error in deleteCausa:', error);
         // Si es un error de Prisma (causa no encontrada)
         if (error.code === 'P2025') {
             return res.status(404).json({ error: `Causa con id ${id} no encontrada` });

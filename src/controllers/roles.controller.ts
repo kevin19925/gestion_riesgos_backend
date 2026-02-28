@@ -8,7 +8,6 @@ export const getRoles = async (req: Request, res: Response) => {
         });
         res.json(roles);
     } catch (error) {
-        console.error('[BACKEND] Error in getRoles:', error);
         res.status(500).json({ error: 'Error fetching roles' });
     }
 };
@@ -23,13 +22,11 @@ export const getRoleById = async (req: Request, res: Response) => {
         if (!role) return res.status(404).json({ error: 'Role not found' });
         res.json(role);
     } catch (error) {
-        console.error('[BACKEND] Error in getRoleById:', error);
         res.status(500).json({ error: 'Error fetching role' });
     }
 };
 
 export const createRole = async (req: Request, res: Response) => {
-    console.log('[BACKEND] createRole - body:', JSON.stringify(req.body, null, 2));
     const { codigo, nombre, descripcion, permisos, activo } = req.body;
     try {
         if (!codigo || !nombre) {
@@ -47,7 +44,6 @@ export const createRole = async (req: Request, res: Response) => {
         });
         res.json(nuevoRole);
     } catch (error: any) {
-        console.error('[BACKEND] Error in createRole:', error);
         res.status(500).json({
             error: 'Error creating role',
             details: error.message
@@ -57,7 +53,6 @@ export const createRole = async (req: Request, res: Response) => {
 
 export const updateRole = async (req: Request, res: Response) => {
     const id = Number(req.params.id);
-    console.log(`[BACKEND] updateRole - id: ${id}`);
     const { codigo, nombre, descripcion, permisos, activo } = req.body;
     try {
         const updateData: any = {};
@@ -73,7 +68,6 @@ export const updateRole = async (req: Request, res: Response) => {
         });
         res.json(role);
     } catch (error: any) {
-        console.error('[BACKEND] Error in updateRole:', error);
         res.status(500).json({
             error: 'Error updating role',
             details: error.message
@@ -100,7 +94,6 @@ export const deleteRole = async (req: Request, res: Response) => {
         });
         res.json({ success: true });
     } catch (error: any) {
-        console.error('[BACKEND] Error in deleteRole:', error);
         res.status(500).json({
             error: 'Error deleting role',
             details: error.message
