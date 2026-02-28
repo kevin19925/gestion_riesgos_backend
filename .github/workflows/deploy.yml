@@ -34,8 +34,10 @@ jobs:
             mkdir -p "$DEPLOY_DIR"
             cd "$DEPLOY_DIR"
 
+            echo "==> Configurando Git..."
             git config --global --add safe.directory "$DEPLOY_DIR" 2>/dev/null || true
 
+            echo "==> Actualizando código (main)..."
             if [ ! -d ".git" ]; then
               git clone --branch main https://github.com/${{ github.repository }}.git .
             else
@@ -44,14 +46,20 @@ jobs:
               git checkout main
             fi
 
+            echo "==> Creando .env..."
             echo "${{ secrets.DOTENV_FILE }}" > .env
 
+            echo "==> Deteniendo contenedores..."
             docker compose down --remove-orphans 2>/dev/null || docker-compose down --remove-orphans 2>/dev/null || true
 
-            docker compose build --no-cache || docker-compose build --no-cache
+            echo "==> Build Docker (sin caché)..."
+            export BUILDKIT_PROGRESS=plain
+            docker compose build --no-cache --progress=plain 2>&1 || docker-compose build --no-cache 2>&1
 
+            echo "==> Levantando contenedores..."
             docker compose up -d || docker-compose up -d
 
+            echo "==> Esperando y ejecutando migraciones Prisma..."
             sleep 8
             for i in 1 2 3 4 5; do
               if docker compose exec -T app npx prisma migrate deploy 2>/dev/null; then
@@ -61,4 +69,6 @@ jobs:
               sleep 3
             done
 
+            echo "==> Limpieza de imágenes..."
             docker image prune -f 2>/dev/null || true
+            echo "==> Deploy backend listo."
