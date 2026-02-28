@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import prisma from '../prisma';
 import { recalcularRiesgoInherenteDesdeCausas } from './riesgos.controller';
+import { getDeleteErrorMessage } from '../utils/prismaErrors';
 
 export const getListasValores = async (req: Request, res: Response) => {
     // Return hardcoded or dynamic lists
@@ -67,7 +68,9 @@ export const deleteTipologia = async (req: Request, res: Response) => {
         await prisma.tipoRiesgo.delete({ where: { id } });
         res.status(204).send();
     } catch (error) {
-        res.status(500).json({ error: 'Error deleting tipologia' });
+        const msg = getDeleteErrorMessage(error, 'tipología', 'subtipos o riesgos asociados');
+        const status = (error as any)?.code === 'P2025' ? 404 : (error as any)?.code === 'P2003' ? 400 : 500;
+        res.status(status).json({ error: msg });
     }
 };
 
@@ -115,18 +118,17 @@ export const deleteSubtipo = async (req: Request, res: Response) => {
         await prisma.subtipoRiesgo.delete({ where: { id } });
         res.status(204).send();
     } catch (error) {
-        res.status(500).json({ error: 'Error deleting subtipo' });
+        const msg = getDeleteErrorMessage(error, 'subtipo', 'riesgos asociados');
+        const status = (error as any)?.code === 'P2025' ? 404 : (error as any)?.code === 'P2003' ? 400 : 500;
+        res.status(status).json({ error: msg });
     }
 };
 
 export const getConfiguraciones = async (req: Request, res: Response) => {
-    console.log('GET /catalogos/configuraciones');
     try {
         const configs = await prisma.configuracion.findMany();
-        console.log(`Found ${configs.length} configurations`);
         res.json(configs);
     } catch (error) {
-        console.error('Error in getConfiguraciones:', error);
         res.status(500).json({ error: 'Error fetching configuraciones' });
     }
 };
@@ -149,18 +151,15 @@ export const createConfiguracion = async (req: Request, res: Response) => {
         });
         res.status(201).json(created);
     } catch (error) {
-        console.error('Error in createConfiguracion:', error);
         res.status(500).json({ error: 'Error creating configuracion' });
     }
 };
 
 export const getMapaConfig = async (req: Request, res: Response) => {
-    console.log('GET /catalogos/mapa-config');
     try {
         const mapaConfigs = await prisma.mapaConfig.findFirst({
             where: { id: 1 }
         });
-        console.log('Mapa config found:', mapaConfigs ? 'Yes' : 'No');
 
         if (!mapaConfigs || !mapaConfigs.ejes) {
             // Return default structure if not found
@@ -175,7 +174,6 @@ export const getMapaConfig = async (req: Request, res: Response) => {
         const parsedEjes = JSON.parse(mapaConfigs.ejes);
         res.json(parsedEjes);
     } catch (error) {
-        console.error('Error in getMapaConfig:', error);
         res.status(500).json({ error: 'Error fetching mapa config' });
     }
 };
@@ -225,7 +223,9 @@ export const deleteObjetivo = async (req: Request, res: Response) => {
         await prisma.objetivo.delete({ where: { id } });
         res.status(204).send();
     } catch (error) {
-        res.status(500).json({ error: 'Error deleting objetivo' });
+        const msg = getDeleteErrorMessage(error, 'objetivo', 'riesgos o procesos asociados');
+        const status = (error as any)?.code === 'P2025' ? 404 : (error as any)?.code === 'P2003' ? 400 : 500;
+        res.status(status).json({ error: msg });
     }
 };
 
@@ -293,7 +293,6 @@ export const getOrigenes = async (req: Request, res: Response) => {
 };
 
 export const getTiposProceso = async (req: Request, res: Response) => {
-    console.log('GET /catalogos/tipos-proceso');
     const tipos = [
         { id: '1', codigo: '1', nombre: 'Estratégico' },
         { id: '2', codigo: '2', nombre: 'Operacional' },
@@ -331,7 +330,6 @@ export const getNivelesRiesgo = async (req: Request, res: Response) => {
 };
 
 export const getImpactos = async (req: Request, res: Response) => {
-    console.log('GET /catalogos/impactos');
     const impactos = [
         { id: '1', tipo: 'Impacto económico', valor: 0, descripcion: '' },
         { id: '2', tipo: 'Procesos', valor: 0, descripcion: '' },
@@ -349,7 +347,6 @@ export const getImpactos = async (req: Request, res: Response) => {
             });
             res.json(impactos);
         } catch (error) {
-            console.error('Error in getImpactos:', error);
             res.status(500).json({ error: 'Error fetching impactos' });
         }
 };
@@ -402,7 +399,9 @@ export const deleteImpactoTipo = async (req: Request, res: Response) => {
         await prisma.impactoTipo.delete({ where: { id: impactoTipoId } });
         res.status(204).send();
     } catch (error) {
-        res.status(500).json({ error: 'Error deleting impacto tipo' });
+        const msg = getDeleteErrorMessage(error, 'tipo de impacto', 'niveles o registros asociados');
+        const status = (error as any)?.code === 'P2025' ? 404 : (error as any)?.code === 'P2003' ? 400 : 500;
+        res.status(status).json({ error: msg });
     }
 };
 
@@ -484,7 +483,6 @@ export const updateConsecuencias = async (req: Request, res: Response) => {
     }
 };
 export const getEjesMapa = async (req: Request, res: Response) => {
-    console.log('GET /catalogos/ejes-mapa');
     const ejes = {
         probabilidad: [
             { id: 'p1', valor: 1, nombre: 'Muy Baja' },
@@ -501,7 +499,6 @@ export const getEjesMapa = async (req: Request, res: Response) => {
             { id: 'i5', valor: 5, nombre: 'Muy Alto' },
         ]
     };
-    console.log('Returning ejes:', JSON.stringify(ejes));
     res.json(ejes);
 };
 
@@ -530,7 +527,6 @@ export const getPesosImpacto = async (_req: Request, res: Response) => {
             res.json(defaultPesos);
         }
     } catch (error) {
-        console.error('Error in getPesosImpacto:', error);
         res.status(500).json({ error: 'Error fetching pesos impacto' });
     }
 };
@@ -566,10 +562,6 @@ export const updatePesosImpacto = async (req: Request, res: Response) => {
         // de TODOS los riesgos, porque el cambio de porcentajes afecta a todo el universo.
         setImmediate(async () => {
             try {
-                console.log('[BACKEND] updatePesosImpacto - Iniciando recálculo en segundo plano...');
-                const startTime = Date.now();
-                
-                // Obtener todos los IDs de riesgos que tienen evaluación
                 const riesgos = await prisma.riesgo.findMany({
                     select: { id: true },
                     where: {
@@ -579,46 +571,25 @@ export const updatePesosImpacto = async (req: Request, res: Response) => {
                     },
                     orderBy: { id: 'asc' }
                 });
-                
-                console.log(`[BACKEND] updatePesosImpacto - Encontrados ${riesgos.length} riesgos con evaluación para recalcular`);
-                
-                if (riesgos.length === 0) {
-                    console.log('[BACKEND] updatePesosImpacto - No hay riesgos para recalcular');
-                    return;
-                }
-                
-                // Procesar en lotes de 50 para optimizar
+                if (riesgos.length === 0) return;
                 const BATCH_SIZE = 50;
-                let processed = 0;
-                
                 for (let i = 0; i < riesgos.length; i += BATCH_SIZE) {
                     const batch = riesgos.slice(i, i + BATCH_SIZE);
-                    
-                    // Procesar lote en paralelo
                     await Promise.all(
                         batch.map(async ({ id }) => {
                             try {
                                 await recalcularRiesgoInherenteDesdeCausas(id);
                             } catch (error) {
-                                console.error(`[BACKEND] updatePesosImpacto - Error al recalcular riesgo ${id}:`, error);
+                                // ignore
                             }
                         })
                     );
-                    
-                    processed += batch.length;
-                    console.log(`[BACKEND] updatePesosImpacto - Procesados ${processed}/${riesgos.length} riesgos`);
                 }
-                
-                const duration = Date.now() - startTime;
-                console.log(`[BACKEND] updatePesosImpacto - ✅ Recalculación completada en ${duration}ms (${riesgos.length} riesgos)`);
             } catch (error: any) {
-                console.error('[BACKEND] updatePesosImpacto - Error durante el recálculo en segundo plano:', error);
-                console.error('[BACKEND] updatePesosImpacto - Stack:', error?.stack || 'N/A');
-                // No fallar la petición si el recálculo falla, pero registrar el error
+                // No fallar la petición si el recálculo falla
             }
         });
     } catch (error) {
-        console.error('Error in updatePesosImpacto:', error);
         res.status(500).json({ error: 'Error updating pesos impacto' });
     }
 };
@@ -639,8 +610,6 @@ export const updateConfiguracion = async (req: Request, res: Response) => {
 
 export const updateMapaConfig = async (req: Request, res: Response) => {
     const { type, data } = req.body;
-    console.log('PUT /catalogos/mapa-config - type:', type, 'data:', data);
-
     try {
         // Get existing config
         const existing = await prisma.mapaConfig.findFirst({
@@ -667,12 +636,8 @@ export const updateMapaConfig = async (req: Request, res: Response) => {
                 ejes: JSON.stringify(ejesObj)
             }
         });
-
-        console.log('Mapa config updated successfully');
-        // Return the parsed ejes object, not the DB record
         res.json(ejesObj);
     } catch (error) {
-        console.error('Error updating mapa config:', error);
         res.status(500).json({ error: 'Error updating mapa config' });
     }
 };

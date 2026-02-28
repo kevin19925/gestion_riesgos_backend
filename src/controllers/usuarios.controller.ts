@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import prisma from '../prisma';
+import { getDeleteErrorMessage } from '../utils/prismaErrors';
 
 export const getUsuarios = async (req: Request, res: Response) => {
     try {
@@ -66,12 +67,13 @@ export const createUsuario = async (req: Request, res: Response) => {
             }
         }
 
-        const result = await prisma.$executeRaw`
+        const plainPassword = password || 'comware123';
+
+        await prisma.$executeRaw`
             INSERT INTO "Usuario" (nombre, email, password, role, "roleId", "cargoId", activo, "createdAt", "updatedAt")
-            VALUES (${nombre}, ${email}, ${password || 'comware123'}, ${roleCodigo}, ${Number(roleId)}, ${cargoId ? Number(cargoId) : null}, ${activo ?? true}, NOW(), NOW())
+            VALUES (${nombre}, ${email}, ${plainPassword}, ${roleCodigo}, ${Number(roleId)}, ${cargoId ? Number(cargoId) : null}, ${activo ?? true}, NOW(), NOW())
         `;
-        
-        // Obtener el usuario recién creado
+
         const user = await prisma.usuario.findFirst({
             where: { email },
             include: { 
@@ -82,7 +84,6 @@ export const createUsuario = async (req: Request, res: Response) => {
         
         res.status(201).json(user);
     } catch (error: any) {
-        console.error('[BACKEND] Error creating user:', error);
         res.status(500).json({ 
             error: 'Error creating user',
             details: error.message || String(error)
@@ -113,7 +114,6 @@ export const updateUsuario = async (req: Request, res: Response) => {
         });
         res.json(user);
     } catch (error) {
-        console.error('Error updating user:', error);
         res.status(500).json({ error: 'Error updating user' });
     }
 };
@@ -121,11 +121,11 @@ export const updateUsuario = async (req: Request, res: Response) => {
 export const deleteUsuario = async (req: Request, res: Response) => {
     const id = Number(req.params.id);
     try {
-        await prisma.usuario.delete({
-            where: { id }
-        });
+        await prisma.usuario.delete({ where: { id } });
         res.status(204).send();
     } catch (error) {
-        res.status(500).json({ error: 'Error deleting user' });
+        const msg = getDeleteErrorMessage(error, 'usuario', 'procesos, asignaciones o registros asociados');
+        const status = (error as any)?.code === 'P2025' ? 404 : (error as any)?.code === 'P2003' ? 400 : 500;
+        res.status(status).json({ error: msg });
     }
 };

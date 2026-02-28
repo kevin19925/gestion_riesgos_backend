@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import prisma from '../prisma';
+import { getDeleteErrorMessage } from '../utils/prismaErrors';
 
 export const getCargos = async (req: Request, res: Response) => {
     try {
@@ -30,7 +31,6 @@ export const createCargo = async (req: Request, res: Response) => {
         });
         res.status(201).json(cargo);
     } catch (error) {
-        console.error('Error creating cargo:', error);
         res.status(500).json({ error: 'Error creating cargo' });
     }
 };
@@ -51,11 +51,11 @@ export const updateCargo = async (req: Request, res: Response) => {
 export const deleteCargo = async (req: Request, res: Response) => {
     const id = Number(req.params.id);
     try {
-        await prisma.cargo.delete({
-            where: { id }
-        });
+        await prisma.cargo.delete({ where: { id } });
         res.status(204).send();
     } catch (error) {
-        res.status(500).json({ error: 'Error deleting cargo' });
+        const msg = getDeleteErrorMessage(error, 'cargo', 'usuarios asociados');
+        const status = (error as any)?.code === 'P2025' ? 404 : (error as any)?.code === 'P2003' ? 400 : 500;
+        res.status(status).json({ error: msg });
     }
 };

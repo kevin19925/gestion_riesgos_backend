@@ -18,14 +18,12 @@ export async function getRedisClient(): Promise<RedisClientType | null> {
     if (!client) {
       client = createClient({ url: redisUrl });
 
-      client.on('error', (err) => {
+      client.on('error', () => {
         isReady = false;
-        console.error('[REDIS] Error en cliente Redis:', err);
       });
 
       client.on('ready', () => {
         isReady = true;
-        console.log('[REDIS] Cliente listo');
       });
 
       // Conectar una sola vez
@@ -39,7 +37,6 @@ export async function getRedisClient(): Promise<RedisClientType | null> {
 
     return client;
   } catch (err) {
-    console.error('[REDIS] Error inicializando cliente:', err);
     return null;
   }
 }
@@ -52,7 +49,6 @@ export async function redisGet<T = any>(key: string): Promise<T | null> {
     if (raw === null) return null;
     return JSON.parse(raw) as T;
   } catch (err) {
-    console.error('[REDIS] Error en GET', key, err);
     return null;
   }
 }
@@ -68,7 +64,17 @@ export async function redisSet(
     const payload = JSON.stringify(value);
     await c.set(key, payload, { EX: ttlSeconds });
   } catch (err) {
-    console.error('[REDIS] Error en SET', key, err);
+    // ignore
+  }
+}
+
+export async function redisDel(key: string): Promise<void> {
+  try {
+    const c = await getRedisClient();
+    if (!c) return;
+    await c.del(key);
+  } catch (err) {
+    // ignore
   }
 }
 

@@ -237,8 +237,6 @@ async function recalcularCausa(
 export async function recalcularTodosLosRiesgosResiduales(
   preview: boolean = false
 ): Promise<ResultadoRecalculo> {
-  console.log(`[RecalculoResidual] Iniciando recálculo (preview: ${preview})...`);
-
   const resultado: ResultadoRecalculo = {
     causasActualizadas: 0,
     riesgosActualizados: 0,
@@ -254,13 +252,6 @@ export async function recalcularTodosLosRiesgosResiduales(
     const tablaMitigacion = await getTablaMitigacion();
     const rangosNivelRiesgo = await getRangosNivelRiesgo();
 
-    console.log('[RecalculoResidual] Configuración cargada:', {
-      pesos,
-      rangos: rangos.length,
-      tablaMitigacion: Object.keys(tablaMitigacion).length,
-      rangosNivelRiesgo: rangosNivelRiesgo.length
-    });
-
     // 2. Obtener todas las causas con controles
     const causas = await prisma.causaRiesgo.findMany({
       where: {
@@ -273,8 +264,6 @@ export async function recalcularTodosLosRiesgosResiduales(
         }
       }
     });
-
-    console.log(`[RecalculoResidual] Encontradas ${causas.length} causas con controles`);
 
     // 3. Recalcular cada causa
     const riesgosAfectados = new Set<number>();
@@ -298,7 +287,6 @@ export async function recalcularTodosLosRiesgosResiduales(
         }
       } catch (error: any) {
         resultado.errores.push(`Error en causa ${causa.id}: ${error.message}`);
-        console.error(`[RecalculoResidual] Error en causa ${causa.id}:`, error);
       }
     }
 
@@ -315,14 +303,7 @@ export async function recalcularTodosLosRiesgosResiduales(
       }
     }
 
-    console.log('[RecalculoResidual] Recálculo completado:', {
-      causas: resultado.causasActualizadas,
-      riesgos: resultado.riesgosActualizados,
-      errores: resultado.errores.length
-    });
-
   } catch (error: any) {
-    console.error('[RecalculoResidual] Error general:', error);
     resultado.errores.push(`Error general: ${error.message}`);
   }
 

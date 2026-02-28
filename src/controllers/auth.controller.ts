@@ -1,9 +1,12 @@
 import { Request, Response } from 'express';
 import prisma from '../prisma';
+import { signToken } from '../utils/jwt';
 
 export const login = async (req: Request, res: Response) => {
     const { username, password } = req.body;
-    console.log(`[BACKEND] login request - username: ${username}`);
+    if (!username || !password) {
+        return res.status(400).json({ success: false, error: 'Usuario y contraseña requeridos' });
+    }
 
     try {
         const user = await prisma.usuario.findFirst({
@@ -14,26 +17,28 @@ export const login = async (req: Request, res: Response) => {
                 ],
                 password: password
             },
-            include: { 
-                cargo: true,
-                role: true
-            }
+            include: { cargo: true, role: true }
         });
 
         if (!user) {
-            console.warn(`[BACKEND] Login failed for: ${username}`);
             return res.status(401).json({ success: false, error: 'Usuario o contraseña incorrectos' });
         }
 
         if (!user.activo) {
-            console.warn(`[BACKEND] Inactive user login attempt: ${username}`);
             return res.status(401).json({ success: false, error: 'Usuario inactivo' });
         }
 
-        console.log(`[BACKEND] Login successful: ${user.email}`);
         const roleCodigo = user.role?.codigo || 'usuario';
+        const token = signToken({
+            userId: user.id,
+            email: user.email,
+            role: roleCodigo
+        });
+
         res.json({
             success: true,
+            token,
+            expiresIn: process.env.JWT_EXPIRES_IN || '7d',
             user: {
                 id: user.id,
                 username: user.email.split('@')[0],
@@ -46,25 +51,21 @@ export const login = async (req: Request, res: Response) => {
             }
         });
     } catch (error) {
-        console.error('[BACKEND] Login system error:', error);
         res.status(500).json({ success: false, error: 'Error en el servidor' });
     }
 };
 
 export const getMe = async (req: Request, res: Response) => {
-    const { id } = req.query;
-    console.log(`[BACKEND] getMe - id: ${id}`);
-    if (!id) return res.status(400).json({ error: 'User ID required' });
+    const id = (req as any).user?.userId ?? req.query.id;
+    if (!id) return res.status(400).json({ error: 'User ID or token required' });
 
     try {
         const user = await prisma.usuario.findUnique({
             where: { id: Number(id) },
-            include: { 
-                cargo: true,
-                role: true
-            }
+            include: { cargo: true, role: true }
         });
         if (!user) return res.status(404).json({ error: 'User not found' });
+        if (!user.activo) return res.status(403).json({ error: 'User inactive' });
 
         const roleCodigo = user.role?.codigo || 'usuario';
         res.json({
@@ -78,7 +79,6 @@ export const getMe = async (req: Request, res: Response) => {
             esDuenoProcesos: roleCodigo === 'dueño_procesos'
         });
     } catch (error) {
-        console.error('[BACKEND] getMe error:', error);
         res.status(500).json({ error: 'Server error' });
     }
 };

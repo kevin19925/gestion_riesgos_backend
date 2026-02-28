@@ -3,6 +3,7 @@ import cors from 'cors';
 import helmet from 'helmet';
 import morgan from 'morgan';
 import compression from 'compression';
+import { authMiddleware } from './middleware/auth';
 import routes from './routes';
 
 const app = express();
@@ -38,7 +39,6 @@ app.use(cors({
         if (allowedOrigins.indexOf(origin) !== -1) {
             callback(null, true);
         } else {
-            console.warn(`CORS blocked origin: ${origin}`);
             callback(null, true); // Allow anyway in production for now
         }
     },
@@ -76,16 +76,8 @@ app.use((req, res, next) => {
 
 app.use(morgan(process.env.NODE_ENV === 'production' ? 'combined' : 'dev'));
 
-// OPTIMIZADO: Logger Middleware solo en desarrollo
-if (process.env.NODE_ENV === 'development') {
-    app.use((req, res, next) => {
-        console.log(`[BACKEND] ${new Date().toISOString()} - ${req.method} ${req.url}`);
-        if (req.body && Object.keys(req.body).length > 0) {
-            console.log('[BACKEND] Body:', JSON.stringify(req.body, null, 2));
-        }
-        next();
-    });
-}
+// JWT obligatorio en todas las rutas /api salvo health y POST auth/login
+app.use(authMiddleware({ required: true, publicPaths: ['/api/health', '/api/auth/login'] }));
 
 // Main Router
 app.use('/api', routes);
@@ -100,7 +92,6 @@ app.use((req, res, next) => {
 
 // Global Error Handler
 app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
-    console.error(err);
     const status = err.status || 500;
     res.status(status).json({
         status,

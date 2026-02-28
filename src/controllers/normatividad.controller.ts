@@ -17,7 +17,6 @@ export const getNormatividadByProceso = async (req: Request, res: Response) => {
     
     res.json(normatividad);
   } catch (error) {
-    console.error('[BACKEND] Error in getNormatividadByProceso:', error);
     res.status(500).json({ error: 'Error fetching normatividad' });
   }
 };
@@ -36,7 +35,6 @@ export const getNormatividadById = async (req: Request, res: Response) => {
     
     res.json(normatividad);
   } catch (error) {
-    console.error('[BACKEND] Error in getNormatividadById:', error);
     res.status(500).json({ error: 'Error fetching normatividad' });
   }
 };
@@ -69,7 +67,6 @@ export const createNormatividad = async (req: Request, res: Response) => {
     
     res.status(201).json(normatividad);
   } catch (error) {
-    console.error('[BACKEND] Error in createNormatividad:', error);
     res.status(500).json({ error: 'Error creating normatividad' });
   }
 };
@@ -99,7 +96,6 @@ export const updateNormatividad = async (req: Request, res: Response) => {
     if ((error as any).code === 'P2025') {
       return res.status(404).json({ error: 'Normatividad not found' });
     }
-    console.error('[BACKEND] Error in updateNormatividad:', error);
     res.status(500).json({ error: 'Error updating normatividad' });
   }
 };
@@ -117,7 +113,6 @@ export const deleteNormatividad = async (req: Request, res: Response) => {
     if ((error as any).code === 'P2025') {
       return res.status(404).json({ error: 'Normatividad not found' });
     }
-    console.error('[BACKEND] Error in deleteNormatividad:', error);
     res.status(500).json({ error: 'Error deleting normatividad' });
   }
 };
@@ -146,7 +141,6 @@ export const getNormatividadEstadisticas = async (req: Request, res: Response) =
       nivelPromedioCumplimiento: nivelPromedio
     });
   } catch (error) {
-    console.error('[BACKEND] Error in getNormatividadEstadisticas:', error);
     res.status(500).json({ error: 'Error fetching estadisticas' });
   }
 };

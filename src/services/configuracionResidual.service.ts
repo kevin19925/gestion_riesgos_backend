@@ -68,7 +68,6 @@ export async function getConfiguracionActiva() {
 export function invalidarCacheConfiguracion() {
   configCache = null;
   cacheTimestamp = 0;
-  console.log('[ConfigResidual] Caché invalidado');
 }
 
 /**

@@ -1,5 +1,8 @@
 import { Request, Response } from 'express';
 import prisma from '../prisma';
+import { redisGet, redisSet, redisDel } from '../redisClient';
+
+const CACHE_TTL_BENCHMARKING = 120; // 2 min
 
 export const getBenchmarkingByProceso = async (req: Request, res: Response) => {
   try {
@@ -7,13 +10,16 @@ export const getBenchmarkingByProceso = async (req: Request, res: Response) => {
     if (!procesoId) {
       return res.status(400).json({ error: 'procesoId is required' });
     }
+    const cacheKey = `benchmarking:proceso:${procesoId}`;
+    const cached = await redisGet<any[]>(cacheKey);
+    if (cached) return res.json(cached);
     const items = await prisma.benchmarking.findMany({
       where: { procesoId },
       orderBy: { createdAt: 'asc' }
     });
+    await redisSet(cacheKey, items, CACHE_TTL_BENCHMARKING);
     res.json(items);
   } catch (error) {
-    console.error('[BACKEND] Error in getBenchmarkingByProceso:', error);
     res.status(500).json({ error: 'Error fetching benchmarking' });
   }
 };
@@ -48,9 +54,11 @@ export const setBenchmarkingByProceso = async (req: Request, res: Response) => {
       where: { procesoId },
       orderBy: { createdAt: 'asc' }
     });
+    const cacheKey = `benchmarking:proceso:${procesoId}`;
+    await redisDel(cacheKey);
+    await redisSet(cacheKey, items, CACHE_TTL_BENCHMARKING);
     res.json(items);
   } catch (error) {
-    console.error('[BACKEND] Error in setBenchmarkingByProceso:', error);
     res.status(500).json({ error: 'Error saving benchmarking' });
   }
 };
@@ -61,7 +69,6 @@ export const deleteBenchmarkingItem = async (req: Request, res: Response) => {
     await prisma.benchmarking.delete({ where: { id } });
     res.status(204).send();
   } catch (error) {
-    console.error('[BACKEND] Error in deleteBenchmarkingItem:', error);
     res.status(500).json({ error: 'Error deleting benchmarking item' });
   }
 };

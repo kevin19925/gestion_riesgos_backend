@@ -25,7 +25,6 @@ export const getDofaByProceso = async (req: Request, res: Response) => {
     
     res.json(agrupado);
   } catch (error) {
-    console.error('[BACKEND] Error in getDofaByProceso:', error);
     res.status(500).json({ error: 'Error fetching DOFA' });
   }
 };
@@ -44,7 +43,6 @@ export const getDofaElementoById = async (req: Request, res: Response) => {
     
     res.json(dofa);
   } catch (error) {
-    console.error('[BACKEND] Error in getDofaElementoById:', error);
     res.status(500).json({ error: 'Error fetching DOFA element' });
   }
 };
@@ -75,7 +73,6 @@ export const createDofaElemento = async (req: Request, res: Response) => {
     
     res.status(201).json(dofa);
   } catch (error) {
-    console.error('[BACKEND] Error in createDofaElemento:', error);
     res.status(500).json({ error: 'Error creating DOFA element' });
   }
 };
@@ -97,7 +94,6 @@ export const updateDofaElemento = async (req: Request, res: Response) => {
     if ((error as any).code === 'P2025') {
       return res.status(404).json({ error: 'DOFA element not found' });
     }
-    console.error('[BACKEND] Error in updateDofaElemento:', error);
     res.status(500).json({ error: 'Error updating DOFA element' });
   }
 };
@@ -115,7 +111,6 @@ export const deleteDofaElemento = async (req: Request, res: Response) => {
     if ((error as any).code === 'P2025') {
       return res.status(404).json({ error: 'DOFA element not found' });
     }
-    console.error('[BACKEND] Error in deleteDofaElemento:', error);
     res.status(500).json({ error: 'Error deleting DOFA element' });
   }
 };
@@ -159,7 +154,6 @@ export const getDofaEstrategias = async (req: Request, res: Response) => {
     
     res.json(estrategias);
   } catch (error) {
-    console.error('[BACKEND] Error in getDofaEstrategias:', error);
     res.status(500).json({ error: 'Error fetching DOFA estrategias' });
   }
 };
