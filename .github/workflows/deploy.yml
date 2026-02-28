@@ -33,11 +33,15 @@ jobs:
             fi
 
             # 2. Variables de entorno
-            echo "${{ secrets.DOTENV_FILE }}" > .env
-            if ! grep -q '^DATABASE_URL=' .env; then
+            printf '%s\n' "${{ secrets.DOTENV_FILE }}" > .env
+            # Normalizar: quitar BOM UTF-8 y CRLF (Windows)
+            sed -i '1s/^\xEF\xBB\xBF//' .env 2>/dev/null || true
+            tr -d '\r' < .env > .env.__tmp && mv .env.__tmp .env
+
+            if ! grep -qE '^[[:space:]]*DATABASE_URL=[^[:space:]]+' .env; then
               echo "ERROR: El secret DOTENV_FILE no contiene DATABASE_URL=..."
               echo "Claves encontradas en .env (sin valores):"
-              sed -E 's/=.*$//' .env | sed '/^[[:space:]]*$/d'
+              awk -F= 'NF {print $1}' .env | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | grep -v '^#' | grep -v '^[[:space:]]*$' || true
               exit 1
             fi
 
