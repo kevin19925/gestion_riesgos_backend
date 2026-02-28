@@ -18,14 +18,13 @@ jobs:
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
-            set -e # Detener el script si algo falla
-            
+            set -e
             mkdir -p ~/app-empresa
             cd ~/app-empresa
 
             git config --global --add safe.directory /home/${{ secrets.SSH_USER }}/app-empresa
 
-            # 1. Actualización forzada
+            # 1. Sincronizar código
             if [ ! -d ".git" ]; then
               git clone https://github.com/${{ github.repository }}.git .
             else
@@ -33,56 +32,20 @@ jobs:
               git reset --hard origin/main
             fi
 
-            # 2. Inyectar .env
+            # 2. Variables de entorno
             echo "${{ secrets.DOTENV_FILE }}" > .env
 
-            # 3. Limpieza PREVENTIVA (Vital para discos de 30GB)
-            echo "Limpiando espacio en disco..."
+            # 3. Limpieza de espacio (Vital para 30GB de disco)
             docker system prune -f
-            
-            # 4. Reconstrucción controlada
-            # Usamos --parallel 1 para que no intente compilar todo a la vez y sature la RAM
+
+            # 4. Levantar contenedores (Cambiamos npm ci por install internamente)
             docker compose down --remove-orphans
-            docker compose build --no-cache --pull
+            docker compose build --no-cache
             docker compose up -d --force-recreate
 
-            # 5. Migraciones (Prisma)
-            echo "Esperando a que la base de datos esté lista..."
+            # 5. Migraciones Prisma
             sleep 10
-            docker compose exec -T app npx prisma migrate deploy || echo "⚠️ Migraciones fallidas"
-
-            # 6. Limpieza POST-BUILD
+            docker compose exec -T app npx prisma migrate deploy || echo "Migraciones saltadas"
+            
+            # 6. Limpieza final
             docker image prune -f
-
-      # --- SECCIÓN DE NOTIFICACIONES ---
-      
-      - name: Notificación de Éxito ✅
-        if: success()
-        uses: dawidd6/action-send-mail@v3
-        with:
-          server_address: smtp.gmail.com
-          server_port: 465
-          username: ${{ secrets.MAIL_USERNAME }}
-          password: ${{ secrets.MAIL_PASSWORD }}
-          subject: "🚀 Despliegue EXITOSO: ${{ github.repository }}"
-          to: tu-correo@ejemplo.com
-          from: GitHub Actions
-          body: |
-            El despliegue en la MV-Backend-SRC terminó correctamente.
-            Commit: ${{ github.sha }}
-            Mensaje: ${{ github.event.head_commit.message }}
-
-      - name: Notificación de Fallo ❌
-        if: failure()
-        uses: dawidd6/action-send-mail@v3
-        with:
-          server_address: smtp.gmail.com
-          server_port: 465
-          username: ${{ secrets.MAIL_USERNAME }}
-          password: ${{ secrets.MAIL_PASSWORD }}
-          subject: "⚠️ ERROR en Despliegue: ${{ github.repository }}"
-          to: tu-correo@ejemplo.com
-          from: GitHub Actions
-          body: |
-            Algo salió mal en el deploy a Azure. 
-            Revisa los logs aquí: https://github.com/${{ github.repository }}/actions
