@@ -22,12 +22,18 @@ import uploadRoutes from './upload.routes';
 import procesoResponsablesRoutes from './proceso-responsables.routes';
 import calificacionInherenteRoutes from './calificacion-inherente.routes';
 import configuracionResidualRoutes from './configuracionResidual.routes';
+import debugRoutes from './debug.routes';
 
 const router = Router();
 
 // Health Check
 router.get('/health', (req, res) => {
-    res.json({ status: 'ok', uptime: process.uptime() });
+    res.json({ 
+        status: 'ok', 
+        uptime: process.uptime(),
+        version: '2.0.1-debug', // Versión actualizada para confirmar deployment
+        timestamp: new Date().toISOString()
+    });
 });
 
 // Auth Routes
@@ -58,5 +64,6 @@ router.use('/upload', uploadRoutes);
 router.use('/procesos', procesoResponsablesRoutes);
 router.use('/calificacion-inherente', calificacionInherenteRoutes);
 router.use('/configuracion-residual', configuracionResidualRoutes);
+router.use('/debug', debugRoutes); // TEMPORAL - Eliminar en producción
 
 export default router;
