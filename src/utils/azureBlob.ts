@@ -8,45 +8,101 @@ import {
   ContainerClient,
   BlockBlobClient,
 } from '@azure/storage-blob';
-import { randomUUID } from 'crypto';
-
 const CONTAINER_DEFAULT = 'archivos';
+const CONTAINER_IMG_PERFILES_DEFAULT = 'img-perfiles';
 
 let blobServiceClient: BlobServiceClient | null = null;
 let containerName: string = CONTAINER_DEFAULT;
 
-function getBlobServiceClient(): BlobServiceClient {
-  const conn = process.env.AZURE_STORAGE_CONNECTION_STRING;
-  if (!conn) {
+function getConnectionString(): string {
+  const raw = process.env.AZURE_STORAGE_CONNECTION_STRING;
+  if (!raw || !raw.trim()) {
     throw new Error('AZURE_STORAGE_CONNECTION_STRING no está configurada.');
   }
+  return raw
+    .replace(/^\uFEFF/, '')
+    .replace(/^["']|["']$/g, '')
+    .replace(/\r\n?/g, '')
+    .trim();
+}
+
+function sanitizeContainerName(raw: string): string {
+  const s = (typeof raw === 'string' ? raw : String(raw))
+    .replace(/^\uFEFF/, '')
+    .replace(/^["']|["']$/g, '')
+    .replace(/\r\n?/g, '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9-]/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '');
+  if (s.length < 3) return CONTAINER_DEFAULT;
+  return s.slice(0, 63);
+}
+
+function getBlobServiceClient(): BlobServiceClient {
   if (!blobServiceClient) {
-    blobServiceClient = BlobServiceClient.fromConnectionString(conn);
+    blobServiceClient = BlobServiceClient.fromConnectionString(getConnectionString());
   }
   return blobServiceClient;
 }
 
 function getContainer(): ContainerClient {
-  const name = process.env.AZURE_STORAGE_CONTAINER || CONTAINER_DEFAULT;
-  containerName = name;
+  const raw = process.env.AZURE_STORAGE_CONTAINER || CONTAINER_DEFAULT;
+  containerName = sanitizeContainerName(raw);
+  return getBlobServiceClient().getContainerClient(containerName);
+}
+
+function getContainerPerfiles(): ContainerClient {
+  let raw = process.env.AZURE_STORAGE_CONTAINER_IMG_PERFILES || CONTAINER_IMG_PERFILES_DEFAULT;
+  raw = (raw ?? '')
+    .replace(/^\uFEFF/, '')
+    .replace(/^["']|["']$/g, '')
+    .trim();
+  const name = sanitizeContainerName(raw) || CONTAINER_IMG_PERFILES_DEFAULT;
   return getBlobServiceClient().getContainerClient(name);
 }
 
 /**
- * Genera un nombre único para el blob: archivos/año/mes/día/uuid-nombreOriginal
+ * Nombre de blob igual que en prueba-subida-azure (timestamp + nombre seguro, sin rutas).
  */
 function uniqueBlobName(originalName: string): string {
-  const safe = originalName.replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 100);
-  const now = new Date();
-  const y = now.getFullYear();
-  const m = String(now.getMonth() + 1).padStart(2, '0');
-  const d = String(now.getDate()).padStart(2, '0');
-  return `${y}/${m}/${d}/${randomUUID()}-${safe}`;
+  const safe = (originalName || 'file').replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 80);
+  return `${Date.now()}-${safe}`;
+}
+
+/**
+ * Nombre de blob para foto de perfil: basado en el nombre del usuario (y userId para unicidad).
+ * Ej: "Vinicio Barahona" + userId 117 -> "117-vinicio-barahona.jpg"
+ */
+function blobNamePerfil(nombrePerfil: string, userId: number | string, extension: string): string {
+  const slug = (nombrePerfil || 'perfil')
+    .normalize('NFD')
+    .replace(/\p{Diacritic}/gu, '')
+    .replace(/[^a-zA-Z0-9\s-]/g, '')
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, '-')
+    .replace(/-+/g, '-')
+    .slice(0, 60) || 'perfil';
+  const ext = extension.startsWith('.') ? extension.slice(0, 6) : `.${extension.slice(0, 5)}`;
+  return `${userId}-${slug}${ext}`;
+}
+
+function extensionFromMime(mime: string): string {
+  const map: Record<string, string> = {
+    'image/jpeg': '.jpg',
+    'image/jpg': '.jpg',
+    'image/png': '.png',
+    'image/gif': '.gif',
+    'image/webp': '.webp',
+  };
+  return map[mime?.toLowerCase()] || '.jpg';
 }
 
 /**
  * Sube un buffer a Azure Blob Storage y devuelve la URL.
- * Esa URL es la única cosa que debes guardar en la base de datos.
+ * Misma lógica que prueba-subida-azure/server.js (solo blobContentType, sin Content-Disposition).
  */
 export async function uploadToBlob(
   buffer: Buffer,
@@ -54,19 +110,43 @@ export async function uploadToBlob(
   contentType: string
 ): Promise<{ url: string; blobName: string }> {
   const container = getContainer();
-  await container.createIfNotExists(); // crear contenedor si no existe (ej. "archivos")
+  await container.createIfNotExists();
   const blobName = uniqueBlobName(originalName);
   const blockBlob: BlockBlobClient = container.getBlockBlobClient(blobName);
 
   await blockBlob.uploadData(buffer, {
     blobHTTPHeaders: {
-      blobContentType: contentType,
-      blobContentDisposition: `inline; filename="${originalName}"`,
+      blobContentType: contentType || 'application/octet-stream',
     },
   });
 
   const url = blockBlob.url;
   return { url, blobName };
+}
+
+/**
+ * Sube una imagen de perfil al contenedor de perfiles (img-perfiles).
+ * El blob se nombra con el nombre del usuario: userId-nombre-slug.ext
+ */
+export async function uploadToBlobPerfil(
+  buffer: Buffer,
+  nombrePerfil: string,
+  userId: number | string,
+  contentType: string
+): Promise<{ url: string; blobName: string }> {
+  const container = getContainerPerfiles();
+  await container.createIfNotExists();
+  const ext = extensionFromMime(contentType);
+  const blobName = blobNamePerfil(nombrePerfil, userId, ext);
+  const blockBlob = container.getBlockBlobClient(blobName);
+
+  await blockBlob.uploadData(buffer, {
+    blobHTTPHeaders: {
+      blobContentType: contentType || 'image/jpeg',
+    },
+  });
+
+  return { url: blockBlob.url, blobName };
 }
 
 /**
@@ -105,5 +185,6 @@ export async function deleteBlobByUrl(blobUrl: string): Promise<boolean> {
 }
 
 export function isAzureBlobConfigured(): boolean {
-  return !!process.env.AZURE_STORAGE_CONNECTION_STRING;
+  const raw = process.env.AZURE_STORAGE_CONNECTION_STRING;
+  return !!(raw && raw.trim());
 }
