@@ -26,17 +26,16 @@ model Usuario {
   password                      String
   roleId                        Int
   cargoId                       Int?
+  fotoPerfil                    String?                  // URL de la foto en Azure Blob
   activo                        Boolean                  @default(true)
   createdAt                     DateTime                 @default(now())
   updatedAt                     DateTime                 @updatedAt
   areasDirector                 Area[]                   @relation("DirectorArea")
   historialCambios              HistorialCambioProceso[]
   incidenciasResponsable        Incidencia[]
-  notificaciones                Notificacion[]
   observaciones                 Observacion[]            @relation("AutorObservacion")
   procesosResponsable           Proceso[]                @relation("ResponsableProceso")
   procesosResponsablesMultiples ProcesoResponsable[]     @relation("ProcesoResponsables")
-  tareas                        Tarea[]
   cargo                         Cargo?                   @relation(fields: [cargoId], references: [id])
   role                          Role                     @relation(fields: [roleId], references: [id], onDelete: NoAction, onUpdate: NoAction)
   procesosParticipantes         Proceso[]                @relation("Participantes")
@@ -506,29 +505,6 @@ model ReglaAgregacionCalificacion {
   createdAt      DateTime                    @default(now())
   updatedAt      DateTime                    @updatedAt
   config         CalificacionInherenteConfig @relation(fields: [configId], references: [id], onDelete: Cascade)
-}
-
-model Notificacion {
-  id        Int      @id @default(autoincrement())
-  usuarioId Int
-  titulo    String
-  mensaje   String
-  leida     Boolean  @default(false)
-  tipo      String
-  createdAt DateTime @default(now())
-  usuario   Usuario  @relation(fields: [usuarioId], references: [id])
-}
-
-model Tarea {
-  id          Int      @id @default(autoincrement())
-  usuarioId   Int
-  titulo      String
-  descripcion String
-  estado      String
-  prioridad   String
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-  usuario     Usuario  @relation(fields: [usuarioId], references: [id])
 }
 
 model Observacion {

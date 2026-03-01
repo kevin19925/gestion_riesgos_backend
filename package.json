@@ -11,7 +11,8 @@
     "lint": "eslint src/**/*.ts",
     "test": "jest",
     "seed": "npx tsx prisma/seed-completo.ts",
-    "seed:basic": "npx tsx prisma/seed.ts"
+    "seed:basic": "npx tsx prisma/seed.ts",
+    "drop-notif-tarea": "npx tsx scripts/drop-notificacion-tarea.ts"
   },
   "keywords": [
     "node",

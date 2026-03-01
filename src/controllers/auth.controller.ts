@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import prisma from '../prisma';
 import { signToken } from '../utils/jwt';
+import { deleteBlobByUrl, isAzureBlobConfigured } from '../utils/azureBlob';
 
 export const login = async (req: Request, res: Response) => {
     const { username, password } = req.body;
@@ -17,7 +18,16 @@ export const login = async (req: Request, res: Response) => {
                 ],
                 password: password
             },
-            include: { cargo: true, role: true }
+            select: {
+                id: true,
+                nombre: true,
+                email: true,
+                activo: true,
+                roleId: true,
+                cargoId: true,
+                role: { select: { codigo: true } },
+                cargo: { select: { nombre: true } }
+            }
         });
 
         if (!user) {
@@ -47,11 +57,13 @@ export const login = async (req: Request, res: Response) => {
                 role: roleCodigo,
                 department: user.cargo?.nombre || 'General',
                 position: user.cargo?.nombre || roleCodigo,
-                esDuenoProcesos: roleCodigo === 'dueño_procesos'
+                esDuenoProcesos: roleCodigo === 'dueño_procesos',
+                fotoPerfil: null
             }
         });
-    } catch (error) {
-        res.status(500).json({ success: false, error: 'Error en el servidor' });
+    } catch (error: any) {
+        console.error('[auth/login]', error?.message || error);
+        res.status(500).json({ success: false, error: 'No se pudo iniciar sesión. Intente de nuevo.' });
     }
 };
 
@@ -62,7 +74,17 @@ export const getMe = async (req: Request, res: Response) => {
     try {
         const user = await prisma.usuario.findUnique({
             where: { id: Number(id) },
-            include: { cargo: true, role: true }
+            select: {
+                id: true,
+                nombre: true,
+                email: true,
+                activo: true,
+                roleId: true,
+                cargoId: true,
+                fotoPerfil: true,
+                role: { select: { codigo: true } },
+                cargo: { select: { nombre: true } }
+            }
         });
         if (!user) return res.status(404).json({ error: 'User not found' });
         if (!user.activo) return res.status(403).json({ error: 'User inactive' });
@@ -76,9 +98,84 @@ export const getMe = async (req: Request, res: Response) => {
             role: roleCodigo,
             department: user.cargo?.nombre || 'General',
             position: user.cargo?.nombre || roleCodigo,
-            esDuenoProcesos: roleCodigo === 'dueño_procesos'
+            esDuenoProcesos: roleCodigo === 'dueño_procesos',
+            fotoPerfil: (user as { fotoPerfil?: string | null }).fotoPerfil ?? null
         });
-    } catch (error) {
-        res.status(500).json({ error: 'Server error' });
+    } catch (error: any) {
+        console.error('[auth/getMe]', error?.message || error);
+        res.status(500).json({ error: 'No se pudo cargar el usuario. Intente de nuevo.' });
+    }
+};
+
+export const updateMe = async (req: Request, res: Response) => {
+    const userId = (req as any).user?.userId;
+    if (!userId) return res.status(401).json({ error: 'No autorizado' });
+
+    const { nombre, passwordActual, passwordNueva, fotoPerfil } = req.body;
+
+    try {
+        const user = await prisma.usuario.findUnique({
+            where: { id: Number(userId) },
+            include: { cargo: true, role: true }
+        });
+        if (!user) return res.status(404).json({ error: 'Usuario no encontrado' });
+        if (!user.activo) return res.status(403).json({ error: 'Usuario inactivo' });
+
+        const updateData: { nombre?: string; password?: string; fotoPerfil?: string | null } = {};
+
+        if (nombre !== undefined && typeof nombre === 'string' && nombre.trim()) {
+            updateData.nombre = nombre.trim();
+        }
+
+        if (passwordNueva !== undefined && passwordNueva !== '') {
+            if (!passwordActual || user.password !== passwordActual) {
+                return res.status(400).json({ error: 'La contraseña actual no es correcta' });
+            }
+            updateData.password = passwordNueva;
+        }
+
+        if (fotoPerfil !== undefined) {
+            const newFoto = fotoPerfil === '' || fotoPerfil == null ? null : String(fotoPerfil);
+            const oldFoto = (user as any).fotoPerfil;
+            if (oldFoto && oldFoto.trim() && isAzureBlobConfigured()) {
+                try {
+                    await deleteBlobByUrl(oldFoto);
+                } catch (e) {
+                    console.warn('[auth/updateMe] No se pudo borrar la imagen anterior:', (e as Error)?.message);
+                }
+            }
+            updateData.fotoPerfil = newFoto;
+        }
+
+        if (Object.keys(updateData).length === 0) {
+            return res.status(400).json({ error: 'No hay datos para actualizar' });
+        }
+
+        const updated = await prisma.usuario.update({
+            where: { id: Number(userId) },
+            data: updateData,
+            include: { cargo: true, role: true }
+        });
+
+        const roleCodigo = updated.role?.codigo || 'usuario';
+        res.json({
+            id: updated.id,
+            username: updated.email.split('@')[0],
+            email: updated.email,
+            fullName: updated.nombre,
+            role: roleCodigo,
+            department: updated.cargo?.nombre || 'General',
+            position: updated.cargo?.nombre || roleCodigo,
+            esDuenoProcesos: roleCodigo === 'dueño_procesos',
+            fotoPerfil: (updated as any).fotoPerfil ?? null
+        });
+    } catch (error: any) {
+        console.error('[auth/updateMe]', error?.message || error);
+        const raw = error?.message || '';
+        let msg = 'No se pudo guardar. Intente de nuevo.';
+        if (raw.includes('contraseña') || raw.includes('password')) msg = 'Revise la contraseña actual e intente de nuevo.';
+        else if (raw.includes('Unique') || raw.includes('unique')) msg = 'Ese correo o nombre ya está en uso.';
+        else if (raw.includes('Prisma') || raw.includes('invocation')) msg = 'Error al guardar los datos. Intente más tarde.';
+        res.status(500).json({ error: msg });
     }
 };
