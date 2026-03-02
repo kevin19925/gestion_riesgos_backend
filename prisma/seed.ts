@@ -111,7 +111,6 @@ async function main() {
             prisma.normatividad.deleteMany({}),
             prisma.contexto.deleteMany({}),
             prisma.observacion.deleteMany({}),
-            prisma.historialCambioProceso.deleteMany({}),
             prisma.proceso.deleteMany({}),
             prisma.area.deleteMany({}),
             prisma.usuario.deleteMany({}),
@@ -162,10 +161,10 @@ async function main() {
         // 4. CREAR GERENCIAS
         console.log('🏢 Creando gerencias...')
         const gerenciasData = [
-            { nombre: 'Gerencia Financiera', sigla: 'GF', subdivision: 'Vicepresidencia Financiera' },
-            { nombre: 'Gerencia Talento Humano', sigla: 'GTH', subdivision: 'Vicepresidencia Talento' },
-            { nombre: 'Gerencia Tecnología', sigla: 'GT', subdivision: 'Vicepresidencia Tecnología' },
-            { nombre: 'Gerencia Ciberseguridad', sigla: 'GCS', subdivision: 'Vicepresidencia Tecnología' },
+            { nombre: 'Gerencia Financiera', subdivision: 'Vicepresidencia Financiera' },
+            { nombre: 'Gerencia Talento Humano', subdivision: 'Vicepresidencia Talento' },
+            { nombre: 'Gerencia Tecnología', subdivision: 'Vicepresidencia Tecnología' },
+            { nombre: 'Gerencia Ciberseguridad', subdivision: 'Vicepresidencia Tecnología' },
         ]
         const gerencias = await prisma.gerencia.createMany({ data: gerenciasData })
         console.log(`✅ ${gerenciasData.length} gerencias creadas\n`)
@@ -191,7 +190,6 @@ async function main() {
         console.log('📚 Creando tipos de riesgo...')
         const tipoRiesgoEstrategico = await prisma.tipoRiesgo.create({
             data: {
-                codigo: '1',
                 nombre: 'Estratégico',
                 descripcion: 'Riesgos de plan estratégico',
                 subtipos: {
@@ -220,7 +218,6 @@ async function main() {
 
         const tipoRiesgoFinanciero = await prisma.tipoRiesgo.create({
             data: {
-                codigo: '3',
                 nombre: 'Financiero',
                 descripcion: 'Riesgos financieros',
                 subtipos: {
@@ -234,7 +231,6 @@ async function main() {
 
         const tipoRiesgoCumplimiento = await prisma.tipoRiesgo.create({
             data: {
-                codigo: '4',
                 nombre: 'Cumplimiento',
                 descripcion: 'Riesgos normativo',
                 subtipos: {

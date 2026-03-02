@@ -121,3 +121,14 @@ export async function getRangosNivelRiesgo() {
   const config = await getConfiguracionActiva();
   return config.rangosNivelRiesgo;
 }
+
+/**
+ * Porcentaje de reducción en dimensión cruzada (cuando control aplica a IMPACTO pero se reduce frecuencia, o al revés).
+ * Valor entre 0 y 1 (ej. 0.34 = 34%). Si no está configurado en admin, se usa 0.34 (Excel).
+ */
+export async function getPorcentajeDimensionCruzada(): Promise<number> {
+  const config = await getConfiguracionActiva();
+  const v = config.porcentajeReduccionDimensionCruzada;
+  if (v != null && v >= 0 && v <= 1) return v;
+  return 0.34;
+}

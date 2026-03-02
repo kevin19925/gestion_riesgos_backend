@@ -25,6 +25,7 @@ export const login = async (req: Request, res: Response) => {
                 activo: true,
                 roleId: true,
                 cargoId: true,
+                fotoPerfil: true,
                 role: { select: { codigo: true } },
                 cargo: { select: { nombre: true } }
             }
@@ -58,7 +59,7 @@ export const login = async (req: Request, res: Response) => {
                 department: user.cargo?.nombre || 'General',
                 position: user.cargo?.nombre || roleCodigo,
                 esDuenoProcesos: roleCodigo === 'dueño_procesos',
-                fotoPerfil: null
+                fotoPerfil: (user as { fotoPerfil?: string | null }).fotoPerfil ?? null
             }
         });
     } catch (error: any) {
@@ -137,7 +138,9 @@ export const updateMe = async (req: Request, res: Response) => {
         if (fotoPerfil !== undefined) {
             const newFoto = fotoPerfil === '' || fotoPerfil == null ? null : String(fotoPerfil);
             const oldFoto = (user as any).fotoPerfil;
-            if (oldFoto && oldFoto.trim() && isAzureBlobConfigured()) {
+            // Borrar el blob anterior solo si es distinto al nuevo (mismo usuario = mismo nombre de blob; la subida ya lo reemplazó)
+            const mismaUrl = oldFoto && newFoto && oldFoto.trim() === newFoto.trim();
+            if (oldFoto && oldFoto.trim() && !mismaUrl && isAzureBlobConfigured()) {
                 try {
                     await deleteBlobByUrl(oldFoto);
                 } catch (e) {

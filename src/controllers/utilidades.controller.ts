@@ -38,18 +38,7 @@ export const createObservacion = async (req: Request, res: Response) => {
 // ============================================
 // HISTORIAL
 // ============================================
-export const getHistorial = async (req: Request, res: Response) => {
-    const { procesoId } = req.query;
-    try {
-        const where = procesoId ? { procesoId: Number(procesoId) } : {};
-        const history = await prisma.historialCambioProceso.findMany({
-            where,
-            include: { usuario: true },
-            orderBy: { fecha: 'desc' }
-        });
-        res.json(history);
-    } catch (error) {
-        res.status(500).json({ error: 'Error fetching history' });
-    }
+export const getHistorial = async (_req: Request, res: Response) => {
+    res.json([]);
 };
 

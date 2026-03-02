@@ -12,7 +12,11 @@
     "test": "jest",
     "seed": "npx tsx prisma/seed-completo.ts",
     "seed:basic": "npx tsx prisma/seed.ts",
-    "drop-notif-tarea": "npx tsx scripts/drop-notificacion-tarea.ts"
+    "drop-notif-tarea": "npx tsx scripts/drop-notificacion-tarea.ts",
+    "exportar-config-residual": "npx tsx scripts/exportar-datos-config-residual.ts",
+    "aplicar-procedimiento-residual": "npx tsx scripts/aplicar-procedimiento-residual.ts",
+    "consulta-bd-clasificacion-residual": "npx tsx scripts/consulta-bd-clasificacion-residual.ts",
+    "test:residual": "npx tsx scripts/pruebas-recalculo-residual.ts"
   },
   "keywords": [
     "node",
