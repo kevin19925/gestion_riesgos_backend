@@ -194,9 +194,10 @@ export const getProcesoById = async (req: Request, res: Response) => {
                         descripcion: true,
                         numeroIdentificacion: true,
                         clasificacion: true,
-                        zona: true
+                        tipoRiesgoId: true,
+                        subtipoRiesgoId: true
                     },
-                    take: 100 // Limitar a 100 riesgos
+                    take: 100
                 },
                 dofaItems: true,
                 normatividades: true,

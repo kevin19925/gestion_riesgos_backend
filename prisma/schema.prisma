@@ -31,7 +31,6 @@ model Usuario {
   createdAt                     DateTime                 @default(now())
   updatedAt                     DateTime                 @updatedAt
   areasDirector                 Area[]                   @relation("DirectorArea")
-  historialCambios              HistorialCambioProceso[]
   incidenciasResponsable        Incidencia[]
   observaciones                 Observacion[]            @relation("AutorObservacion")
   procesosResponsable           Proceso[]                @relation("ResponsableProceso")
@@ -51,7 +50,6 @@ model Cargo {
 model Gerencia {
   id          Int      @id @default(autoincrement())
   nombre      String   @unique
-  sigla       String?
   subdivision String?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
@@ -91,7 +89,6 @@ model Proceso {
   contextos       Contexto[]
   documentos      Documento[]
   dofaItems       DofaItem[]
-  historial       HistorialCambioProceso[]
   incidencias     Incidencia[]
   normatividades  Normatividad[]
   observaciones   Observacion[]
@@ -157,40 +154,31 @@ model Contexto {
 }
 
 model Riesgo {
-  id                          Int                   @id @default(autoincrement())
-  procesoId                   Int
-  numero                      Int
-  descripcion                 String
-  clasificacion               String?
-  zona                        String?
-  numeroIdentificacion        String?
-  tipologiaNivelI             String?
-  tipologiaNivelII            String?
-  tipoRiesgoId                Int?
-  subtipoRiesgoId             Int?
-  objetivoId                  Int?
-  causaRiesgo                 String?
-  fuenteCausa                 String?
-  origen                      String?
+  id                    Int                   @id @default(autoincrement())
+  procesoId             Int
+  numero                Int
+  descripcion           String
+  clasificacion         String?
+  numeroIdentificacion  String?
+  tipoRiesgoId          Int?
+  subtipoRiesgoId       Int?
+  objetivoId            Int?
+  origen                String?
   vicepresidenciaGerenciaAlta String?
-  siglaVicepresidencia        String?
-  gerencia                    String?
-  siglaGerencia               String?
-  createdAt                   DateTime              @default(now())
-  updatedAt                   DateTime              @updatedAt
-  subtipoRiesgo               String?
-  tipoRiesgo                  String?
-  causas                      CausaRiesgo[]
-  controles                   Control[]
-  evaluacion                  EvaluacionRiesgo?
-  eventosMaterializados       EventoMaterializado[]
-  incidencias                 Incidencia[]
-  planesAccion                PlanAccion[]
-  priorizacion                PriorizacionRiesgo?
-  objetivo                    Objetivo?             @relation(fields: [objetivoId], references: [id])
-  proceso                     Proceso               @relation(fields: [procesoId], references: [id])
-  subtipoRiesgoRelacion       SubtipoRiesgo?        @relation(fields: [subtipoRiesgoId], references: [id])
-  tipoRiesgoRelacion          TipoRiesgo?           @relation(fields: [tipoRiesgoId], references: [id])
+  gerencia              String?
+  createdAt             DateTime              @default(now())
+  updatedAt             DateTime              @updatedAt
+  causas                CausaRiesgo[]
+  controles             Control[]
+  evaluacion            EvaluacionRiesgo?
+  eventosMaterializados EventoMaterializado[]
+  incidencias           Incidencia[]
+  planesAccion          PlanAccion[]
+  priorizacion          PriorizacionRiesgo?
+  objetivo              Objetivo?              @relation(fields: [objetivoId], references: [id])
+  proceso               Proceso               @relation(fields: [procesoId], references: [id])
+  subtipoRiesgoRelacion SubtipoRiesgo?        @relation(fields: [subtipoRiesgoId], references: [id])
+  tipoRiesgoRelacion    TipoRiesgo?           @relation(fields: [tipoRiesgoId], references: [id])
 
   @@unique([procesoId, numero])
   @@index([procesoId])
@@ -204,11 +192,12 @@ model CausaRiesgo {
   fuenteCausa  String?
   frecuencia   String?
   seleccionada Boolean         @default(false)
-  orden        Int?
   tipoGestion  String?
   gestion      Json?
   riesgo       Riesgo          @relation(fields: [riesgoId], references: [id], onDelete: Cascade)
   controles    ControlRiesgo[]
+  incidencias  Incidencia[]
+  planesAccion PlanAccion[]
 
   @@index([riesgoId])
 }
@@ -277,6 +266,7 @@ model PlanAccion {
   priorizacionId   Int?
   riesgoId         Int?
   incidenciaId     Int?
+  causaRiesgoId    Int?
   nombre           String?
   objetivo         String?
   descripcion      String
@@ -293,8 +283,9 @@ model PlanAccion {
   createdAt        DateTime            @default(now())
   updatedAt        DateTime            @updatedAt
   incidencia       Incidencia?         @relation(fields: [incidenciaId], references: [id])
-  priorizacion     PriorizacionRiesgo? @relation(fields: [priorizacionId], references: [id], onDelete: Cascade)
+  priorizacion     PriorizacionRiesgo?  @relation(fields: [priorizacionId], references: [id], onDelete: Cascade)
   riesgo           Riesgo?             @relation(fields: [riesgoId], references: [id])
+  causaRiesgo      CausaRiesgo?         @relation(fields: [causaRiesgoId], references: [id])
 }
 
 model Control {
@@ -317,6 +308,7 @@ model Incidencia {
   id                      Int          @id @default(autoincrement())
   codigo                  String?      @unique
   riesgoId                Int?
+  causaRiesgoId           Int?
   procesoId               Int?
   titulo                  String?
   descripcion             String
@@ -331,18 +323,19 @@ model Incidencia {
   createdAt               DateTime     @default(now())
   updatedAt               DateTime     @updatedAt
   proceso                 Proceso?     @relation(fields: [procesoId], references: [id])
-  responsable             Usuario?     @relation(fields: [responsableId], references: [id])
-  riesgo                  Riesgo?      @relation(fields: [riesgoId], references: [id])
+  responsable             Usuario?    @relation(fields: [responsableId], references: [id])
+  riesgo                  Riesgo?     @relation(fields: [riesgoId], references: [id])
+  causaRiesgo             CausaRiesgo? @relation(fields: [causaRiesgoId], references: [id])
   planesAccion            PlanAccion[]
 
   @@index([procesoId])
   @@index([riesgoId])
+  @@index([causaRiesgoId])
   @@index([fechaOcurrencia])
 }
 
 model TipoRiesgo {
   id          Int             @id @default(autoincrement())
-  codigo      String          @unique
   nombre      String          @unique
   descripcion String?
   riesgos     Riesgo[]
@@ -351,7 +344,6 @@ model TipoRiesgo {
 
 model SubtipoRiesgo {
   id           Int        @id @default(autoincrement())
-  codigo       String?
   nombre       String
   descripcion  String?
   tipoRiesgoId Int
@@ -407,18 +399,6 @@ model ImpactoNivel {
   impactoTipo   ImpactoTipo @relation(fields: [impactoTipoId], references: [id], onDelete: Cascade)
 
   @@unique([impactoTipoId, nivel])
-}
-
-model Formula {
-  id          Int      @id @default(autoincrement())
-  nombre      String   @unique
-  descripcion String?
-  formula     String
-  categoria   String?
-  activa      Boolean  @default(true)
-  variables   String[]
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
 }
 
 model MapaConfig {
@@ -519,18 +499,6 @@ model Observacion {
   proceso   Proceso  @relation(fields: [procesoId], references: [id], onDelete: Cascade)
 }
 
-model HistorialCambioProceso {
-  id        Int      @id @default(autoincrement())
-  procesoId Int
-  usuarioId Int
-  tipo      String
-  mensaje   String
-  fecha     DateTime @default(now())
-  cambios   String?
-  proceso   Proceso  @relation(fields: [procesoId], references: [id], onDelete: Cascade)
-  usuario   Usuario  @relation(fields: [usuarioId], references: [id])
-}
-
 model EventoMaterializado {
   id               Int      @id @default(autoincrement())
   riesgoId         Int
@@ -575,17 +543,18 @@ model Documento {
 }
 
 model ConfiguracionResidual {
-  id                Int                 @id @default(autoincrement())
-  nombre            String              @unique @default("Configuración Principal")
-  activa            Boolean             @default(true)
-  descripcion       String?
-  createdAt         DateTime            @default(now())
-  updatedAt         DateTime            @updatedAt
-  pesosCriterios    PesoCriterioResidual[]
-  rangosEvaluacion  RangoEvaluacionResidual[]
-  tablaMitigacion   TablaMitigacionResidual[]
-  rangosNivelRiesgo RangoNivelRiesgoResidual[]
-  opcionesCriterios OpcionCriterioResidual[]
+  id                          Int                 @id @default(autoincrement())
+  nombre                      String              @unique @default("Configuración Principal")
+  activa                      Boolean             @default(true)
+  descripcion                 String?
+  porcentajeReduccionDimensionCruzada Float?      // Reducción (0-1) cuando control aplica a la otra dimensión (ej. 0.34). Admin.
+  createdAt                   DateTime            @default(now())
+  updatedAt                   DateTime            @updatedAt
+  pesosCriterios              PesoCriterioResidual[]
+  rangosEvaluacion            RangoEvaluacionResidual[]
+  tablaMitigacion             TablaMitigacionResidual[]
+  rangosNivelRiesgo           RangoNivelRiesgoResidual[]
+  opcionesCriterios           OpcionCriterioResidual[]
 }
 
 model PesoCriterioResidual {

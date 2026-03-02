@@ -33,7 +33,6 @@ async function main() {
         await prisma.normatividad.deleteMany({})
         await prisma.contexto.deleteMany({})
         await prisma.observacion.deleteMany({})
-        await prisma.historialCambioProceso.deleteMany({})
         await prisma.proceso.deleteMany({})
         await prisma.area.deleteMany({})
         await prisma.usuario.deleteMany({})
@@ -140,22 +139,22 @@ async function main() {
     // 4. CREAR GERENCIAS
     console.log('🏢 Creando gerencias...')
     const gerenciasData = [
-        { nombre: 'Gerencia de Planificación Financiera', sigla: 'GPF', subdivision: 'Vicepresidencia Financiera' },
-        { nombre: 'Gerencia de Contabilidad', sigla: 'GCNT', subdivision: 'Vicepresidencia Financiera' },
-        { nombre: 'Gerencia de Desarrollo Humano', sigla: 'GDH', subdivision: 'Vicepresidencia de Talento Humano' },
-        { nombre: 'Gerencia de Infraestructura', sigla: 'GI', subdivision: 'Vicepresidencia de Tecnología' },
-        { nombre: 'Gerencia de Ventas', sigla: 'GV', subdivision: 'Vicepresidencia Comercial' },
-        { nombre: 'Gerencia de Marketing', sigla: 'GM', subdivision: 'Vicepresidencia Comercial' },
-        { nombre: 'Gerencia de Operaciones', sigla: 'GO', subdivision: 'Vicepresidencia de Talento Humano' },
-        { nombre: 'Gerencia de Calidad', sigla: 'GC', subdivision: 'Vicepresidencia Financiera' },
-        { nombre: 'Gerencia de Compliance y Legal', sigla: 'GCL', subdivision: 'Vicepresidencia de Compliance' },
-        { nombre: 'Gerencia de Seguridad y Protección', sigla: 'GSP', subdivision: 'Vicepresidencia de Compliance' },
-        { nombre: 'Gerencia de Soporte Técnico', sigla: 'GST', subdivision: 'Vicepresidencia de Tecnología' },
-        { nombre: 'Gerencia de Dirección Estratégica', sigla: 'GDE', subdivision: 'Vicepresidencia de Dirección' },
-        { nombre: 'Gerencia de Procesos y Calidad', sigla: 'GPC', subdivision: 'Vicepresidencia de Operaciones' },
-        { nombre: 'Gerencia de Logística', sigla: 'GL', subdivision: 'Vicepresidencia de Operaciones' },
-        { nombre: 'Gerencia de Innovación y Tecnología', sigla: 'GIT', subdivision: 'Vicepresidencia de Tecnología' },
-        { nombre: 'Gerencia de Administración', sigla: 'GA', subdivision: 'Vicepresidencia Financiera' },
+        { nombre: 'Gerencia de Planificación Financiera', subdivision: 'Vicepresidencia Financiera' },
+        { nombre: 'Gerencia de Contabilidad', subdivision: 'Vicepresidencia Financiera' },
+        { nombre: 'Gerencia de Desarrollo Humano', subdivision: 'Vicepresidencia de Talento Humano' },
+        { nombre: 'Gerencia de Infraestructura', subdivision: 'Vicepresidencia de Tecnología' },
+        { nombre: 'Gerencia de Ventas', subdivision: 'Vicepresidencia Comercial' },
+        { nombre: 'Gerencia de Marketing', subdivision: 'Vicepresidencia Comercial' },
+        { nombre: 'Gerencia de Operaciones', subdivision: 'Vicepresidencia de Talento Humano' },
+        { nombre: 'Gerencia de Calidad', subdivision: 'Vicepresidencia Financiera' },
+        { nombre: 'Gerencia de Compliance y Legal', subdivision: 'Vicepresidencia de Compliance' },
+        { nombre: 'Gerencia de Seguridad y Protección', subdivision: 'Vicepresidencia de Compliance' },
+        { nombre: 'Gerencia de Soporte Técnico', subdivision: 'Vicepresidencia de Tecnología' },
+        { nombre: 'Gerencia de Dirección Estratégica', subdivision: 'Vicepresidencia de Dirección' },
+        { nombre: 'Gerencia de Procesos y Calidad', subdivision: 'Vicepresidencia de Operaciones' },
+        { nombre: 'Gerencia de Logística', subdivision: 'Vicepresidencia de Operaciones' },
+        { nombre: 'Gerencia de Innovación y Tecnología', subdivision: 'Vicepresidencia de Tecnología' },
+        { nombre: 'Gerencia de Administración', subdivision: 'Vicepresidencia Financiera' },
     ]
     const gerencias = await prisma.gerencia.createMany({ data: gerenciasData })
     const allGerencias = await prisma.gerencia.findMany()
@@ -180,45 +179,41 @@ async function main() {
     console.log('📚 Creando catálogos de tipos de riesgo...')
     const tiposRiesgoConfig = [
         {
-            codigo: '1',
             nombre: 'Estratégico',
             descripcion: 'Son los riesgos de fallar en la implementación del plan estratégico',
             subtiposList: [
-                { codigo: '1', nombre: 'alianzas', descripcion: 'Alianzas comerciales ineficientes' },
-                { codigo: '2', nombre: 'alineación estratégica', descripcion: 'Falta de alineación estratégica' },
-                { codigo: '3', nombre: 'canales de distribución', descripcion: 'Fallas en canales de distribución' },
-                { codigo: '15', nombre: 'talento humano', descripcion: 'Riesgo de falta de talento clave' }
+                { nombre: 'alianzas', descripcion: 'Alianzas comerciales ineficientes' },
+                { nombre: 'alineación estratégica', descripcion: 'Falta de alineación estratégica' },
+                { nombre: 'canales de distribución', descripcion: 'Fallas en canales de distribución' },
+                { nombre: 'talento humano', descripcion: 'Riesgo de falta de talento clave' }
             ]
         },
         {
-            codigo: '2',
             nombre: 'Operacional',
             descripcion: 'Riesgos relacionados con fallas en procesos, personas y/o tecnología',
             subtiposList: [
-                { codigo: '1', nombre: 'ambiental', descripcion: 'Riesgos asociados a daños ambientales' },
-                { codigo: '2', nombre: 'físico', descripcion: 'Riesgo de pérdida de activos físicos' },
-                { codigo: '6', nombre: 'proceso', descripcion: 'Riesgos en procesos operativos' },
-                { codigo: '9', nombre: 'sistemas', descripcion: 'Riesgos en sistemas de TI' }
+                { nombre: 'ambiental', descripcion: 'Riesgos asociados a daños ambientales' },
+                { nombre: 'físico', descripcion: 'Riesgo de pérdida de activos físicos' },
+                { nombre: 'proceso', descripcion: 'Riesgos en procesos operativos' },
+                { nombre: 'sistemas', descripcion: 'Riesgos en sistemas de TI' }
             ]
         },
         {
-            codigo: '3',
             nombre: 'Financiero',
             descripcion: 'Riesgos relacionados con aspectos financieros',
             subtiposList: [
-                { codigo: '1', nombre: 'contable', descripcion: 'Riesgo contable' },
-                { codigo: '2', nombre: 'crédito', descripcion: 'Riesgo de crédito' },
-                { codigo: '5', nombre: 'mercado', descripcion: 'Riesgo de mercado' }
+                { nombre: 'contable', descripcion: 'Riesgo contable' },
+                { nombre: 'crédito', descripcion: 'Riesgo de crédito' },
+                { nombre: 'mercado', descripcion: 'Riesgo de mercado' }
             ]
         },
         {
-            codigo: '4',
             nombre: 'Cumplimiento',
             descripcion: 'Riesgos relacionados con cumplimiento normativo',
             subtiposList: [
-                { codigo: '1', nombre: 'gobierno corporativo', descripcion: 'Incumplimiento de gobierno corporativo' },
-                { codigo: '3', nombre: 'legal', descripcion: 'Riesgo legal' },
-                { codigo: '5', nombre: 'regulatorio', descripcion: 'Riesgo regulatorio' }
+                { nombre: 'gobierno corporativo', descripcion: 'Incumplimiento de gobierno corporativo' },
+                { nombre: 'legal', descripcion: 'Riesgo legal' },
+                { nombre: 'regulatorio', descripcion: 'Riesgo regulatorio' }
             ]
         }
     ]

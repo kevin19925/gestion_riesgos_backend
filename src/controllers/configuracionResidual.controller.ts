@@ -38,6 +38,7 @@ export const updateConfiguracion = async (req: Request, res: Response) => {
       nombre,
       descripcion,
       activa,
+      porcentajeReduccionDimensionCruzada,
       pesosCriterios,
       rangosEvaluacion,
       tablaMitigacion,
@@ -64,7 +65,8 @@ export const updateConfiguracion = async (req: Request, res: Response) => {
         data: {
           nombre,
           descripcion,
-          activa
+          activa,
+          ...(porcentajeReduccionDimensionCruzada !== undefined && { porcentajeReduccionDimensionCruzada: Number(porcentajeReduccionDimensionCruzada) })
         }
       });
 
@@ -150,12 +152,19 @@ export const updateConfiguracion = async (req: Request, res: Response) => {
       return config;
     });
 
-    // Invalidar caché
     invalidarCacheConfiguracion();
+
+    // Recálculo en Node (procedimiento almacenado no usado)
+    const resultadoRecalc = await recalcularTodosLosRiesgosResiduales(false);
+    const causasActualizadas = resultadoRecalc.causasActualizadas;
+    const riesgosActualizados = resultadoRecalc.riesgosActualizados;
+    console.log(`[ConfiguracionResidual] Recálculo (Node): ${causasActualizadas} causas, ${riesgosActualizados} riesgos`);
+
     res.json({
       success: true,
-      message: 'Configuración actualizada exitosamente',
-      config: updated
+      message: 'Configuración guardada y clasificación residual de todos los controles recalculada.',
+      config: updated,
+      recalc: { causasActualizadas, riesgosActualizados }
     });
 
   } catch (error: any) {
@@ -189,7 +198,11 @@ export const recalcularRiesgos = async (req: Request, res: Response) => {
       });
     }
 
-    const resultado = await recalcularTodosLosRiesgosResiduales(preview);
+    const resNode = await recalcularTodosLosRiesgosResiduales(preview);
+    const resultado = { causasActualizadas: resNode.causasActualizadas, riesgosActualizados: resNode.riesgosActualizados, errores: resNode.errores };
+    if (!preview) {
+      console.log(`[ConfiguracionResidual] Recalcular (Node): ${resNode.causasActualizadas} causas, ${resNode.riesgosActualizados} riesgos`);
+    }
 
     res.json({
       success: true,

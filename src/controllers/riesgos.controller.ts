@@ -1,9 +1,20 @@
 import { Request, Response } from 'express';
 import prisma from '../prisma';
 import { redisGet, redisSet } from '../redisClient';
+import { recalcularResidualPorRiesgo } from '../services/recalculoResidual.service';
+
+/** Invalida caché de listado de riesgos del proceso (con y sin causas) para que el frontend vea datos actualizados */
+async function invalidarCacheRiesgosProceso(procesoId: number): Promise<void> {
+    if (!procesoId) return;
+    const base = `riesgos:proceso:${procesoId}:page:1:size:50:causas:`;
+    await Promise.all([
+        redisSet(`${base}false`, null, 0),
+        redisSet(`${base}true`, null, 0)
+    ]).catch(() => {});
+}
 
 export const getRiesgos = async (req: Request, res: Response) => {
-    const { procesoId, clasificacion, busqueda, page, pageSize, zona, includeCausas } = req.query;
+    const { procesoId, clasificacion, busqueda, page, pageSize, includeCausas } = req.query;
     const where: any = {};
     if (procesoId) {
         const parsedProcesoId = Number(procesoId);
@@ -12,13 +23,11 @@ export const getRiesgos = async (req: Request, res: Response) => {
         }
     }
     // OPTIMIZADO: Filtro de clasificación - usar evaluacion.nivelRiesgo de forma segura
-    // Nota: Si hay un filtro de clasificación, solo mostrar riesgos que tengan evaluación
     if (clasificacion && clasificacion !== 'all') {
         where.evaluacion = {
             nivelRiesgo: String(clasificacion)
         };
     }
-    if (zona) where.zona = String(zona);
     if (busqueda) {
         where.OR = [
             { descripcion: { contains: String(busqueda), mode: 'insensitive' } },
@@ -26,11 +35,13 @@ export const getRiesgos = async (req: Request, res: Response) => {
         ];
     }
 
-    // OPTIMIZADO: Paginación robusta con validación
-    const pageNum = Math.max(1, Number(page) || 1); // Mínimo página 1
-    const requestedPageSize = Number(pageSize) || 50;
+    // OPTIMIZADO: Paginación robusta — normalizar para evitar NaN o valores inválidos
+    const pageNumRaw = Number(page);
+    const pageNum = (Number.isFinite(pageNumRaw) && pageNumRaw >= 1) ? pageNumRaw : 1;
+    const pageSizeRaw = Number(pageSize);
+    const requestedPageSize = (Number.isFinite(pageSizeRaw) && pageSizeRaw >= 1) ? pageSizeRaw : 50;
     const take = Math.min(Math.max(1, requestedPageSize), 100); // Entre 1 y 100
-    const skip = (pageNum - 1) * take;
+    const skip = Math.max(0, (pageNum - 1) * take);
 
     try {
         // Caché en Redis para listados pesados (por proceso/página)
@@ -48,17 +59,19 @@ export const getRiesgos = async (req: Request, res: Response) => {
         // OPTIMIZADO: Include simple - Prisma permite select en el nivel superior
         // Usar select en el nivel superior para evaluacion y proceso
         const include: any = {
-            evaluacion: true, // Incluir toda la evaluación (necesaria para cálculos)
+            evaluacion: true,
             proceso: {
                 select: {
                     id: true,
                     nombre: true,
                     sigla: true,
                 }
-            }
+            },
+            tipoRiesgoRelacion: { select: { id: true, nombre: true } },
+            subtipoRiesgoRelacion: { select: { id: true, nombre: true } }
         };
         
-        // Incluir causas solo si se solicita, limitadas para evitar sobrecarga
+        // Incluir causas solo si se solicita
         // OPTIMIZADO: Reducir a 10 causas por riesgo para mejor rendimiento
         if (includeCausasFlag) {
             include.causas = {
@@ -72,21 +85,6 @@ export const getRiesgos = async (req: Request, res: Response) => {
         // Usar índices en procesoId y createdAt para queries más rápidas
         // OPTIMIZADO: Ordenamiento simple por createdAt (más rápido y confiable)
         const orderBy = { createdAt: 'desc' as const };
-        
-        // OPTIMIZADO: Validar que take y skip sean válidos antes de ejecutar
-        if (take <= 0 || take > 100) {
-            return res.status(400).json({ 
-                error: 'Invalid pageSize', 
-                message: 'pageSize must be between 1 and 100' 
-            });
-        }
-        
-        if (skip < 0) {
-            return res.status(400).json({ 
-                error: 'Invalid page', 
-                message: 'page must be >= 1' 
-            });
-        }
 
         const [riesgos, total] = await Promise.all([
             prisma.riesgo.findMany({
@@ -100,11 +98,15 @@ export const getRiesgos = async (req: Request, res: Response) => {
             prisma.riesgo.count({ where })
         ]);
 
-        // Calcular totalPages de forma segura
         const totalPages = total > 0 ? Math.ceil(total / take) : 0;
+        const data = riesgos.map((r: any) => ({
+            ...r,
+            tipoRiesgo: r.tipoRiesgoRelacion?.nombre ?? null,
+            subtipoRiesgo: r.subtipoRiesgoRelacion?.nombre ?? null
+        }));
 
         const payload = {
-            data: riesgos,
+            data,
             total,
             page: pageNum,
             pageSize: take,
@@ -141,7 +143,6 @@ export const getRiesgoById = async (req: Request, res: Response) => {
         const cached = await redisGet<any>(cacheKey);
         if (cached) return res.json(cached);
 
-        // OPTIMIZADO: Usar select específico y limitar causas
         const riesgo = await prisma.riesgo.findUnique({
             where: { id },
             select: {
@@ -150,26 +151,18 @@ export const getRiesgoById = async (req: Request, res: Response) => {
                 numero: true,
                 descripcion: true,
                 clasificacion: true,
-                zona: true,
                 numeroIdentificacion: true,
-                tipologiaNivelI: true,
-                tipologiaNivelII: true,
                 tipoRiesgoId: true,
                 subtipoRiesgoId: true,
                 objetivoId: true,
-                causaRiesgo: true,
-                fuenteCausa: true,
                 origen: true,
                 vicepresidenciaGerenciaAlta: true,
-                siglaVicepresidencia: true,
                 gerencia: true,
-                siglaGerencia: true,
                 createdAt: true,
                 updatedAt: true,
-                subtipoRiesgo: true,
-                tipoRiesgo: true,
                 evaluacion: true,
-                // OPTIMIZADO: Limitar causas a 20 más recientes
+                tipoRiesgoRelacion: { select: { id: true, nombre: true } },
+                subtipoRiesgoRelacion: { select: { id: true, nombre: true } },
                 causas: {
                     take: 20,
                     orderBy: { id: 'desc' },
@@ -180,7 +173,6 @@ export const getRiesgoById = async (req: Request, res: Response) => {
                         fuenteCausa: true,
                         frecuencia: true,
                         seleccionada: true,
-                        orden: true,
                         tipoGestion: true,
                         gestion: true
                     }
@@ -213,13 +205,33 @@ export const getRiesgoById = async (req: Request, res: Response) => {
         });
 
         if (!riesgo) return res.status(404).json({ error: 'Riesgo not found' });
-        
-        // OPTIMIZADO: Cachear por 2 minutos
-        await redisSet(cacheKey, riesgo, 120);
-        
-        res.json(riesgo);
+        const out = {
+            ...riesgo,
+            tipoRiesgo: (riesgo as any).tipoRiesgoRelacion?.nombre ?? null,
+            subtipoRiesgo: (riesgo as any).subtipoRiesgoRelacion?.nombre ?? null
+        };
+        await redisSet(cacheKey, out, 120);
+        res.json(out);
     } catch (error) {
         res.status(500).json({ error: 'Error fetching riesgo' });
+    }
+};
+
+/** GET /riesgos/next-numero?procesoId=X — devuelve el siguiente número disponible para un proceso (evita duplicados por @@unique(procesoId, numero)). */
+export const getNextNumero = async (req: Request, res: Response) => {
+    const procesoId = Number(req.query.procesoId);
+    if (!procesoId || isNaN(procesoId)) {
+        return res.status(400).json({ error: 'procesoId is required' });
+    }
+    try {
+        const agg = await prisma.riesgo.aggregate({
+            where: { procesoId },
+            _max: { numero: true },
+        });
+        const nextNumero = (agg._max?.numero ?? 0) + 1;
+        return res.json({ nextNumero });
+    } catch (e: any) {
+        res.status(500).json({ error: 'Error getting next numero', details: e?.message });
     }
 };
 
@@ -231,20 +243,33 @@ export const createRiesgo = async (req: Request, res: Response) => {
         if (!riesgoData.procesoId) {
             return res.status(400).json({ error: 'procesoId is required' });
         }
-        if (!riesgoData.numero && riesgoData.numero !== 0) {
-            return res.status(400).json({ error: 'numero is required' });
-        }
         if (!riesgoData.descripcion) {
             return res.status(400).json({ error: 'descripcion is required' });
         }
 
-        const data: any = {
-            ...riesgoData,
-            procesoId: Number(riesgoData.procesoId),
-            numero: Number(riesgoData.numero)
-        };
+        const procesoId = Number(riesgoData.procesoId);
+        // Consulta rápida: max(numero) por procesoId + sigla del proceso (en paralelo)
+        const [proceso, agg] = await Promise.all([
+            prisma.proceso.findUnique({ where: { id: procesoId }, select: { sigla: true } }),
+            prisma.riesgo.aggregate({ where: { procesoId }, _max: { numero: true } }),
+        ]);
+        const sigla = (proceso?.sigla || '').trim().toUpperCase() || 'P';
+        const nextNumero = (agg._max?.numero ?? 0) + 1;
+        const numeroIdentificacion = `${nextNumero}${sigla}`;
 
-        // Create evaluation data if provided (normalize Int/String for Prisma)
+        const data: any = {
+            procesoId,
+            numero: nextNumero,
+            descripcion: String(riesgoData.descripcion ?? ''),
+            clasificacion: riesgoData.clasificacion ?? null,
+            numeroIdentificacion,
+            tipoRiesgoId: riesgoData.tipoRiesgoId != null ? Number(riesgoData.tipoRiesgoId) : null,
+            subtipoRiesgoId: riesgoData.subtipoRiesgoId != null ? Number(riesgoData.subtipoRiesgoId) : null,
+            objetivoId: riesgoData.objetivoId != null ? Number(riesgoData.objetivoId) : null,
+            origen: riesgoData.origen ?? null,
+            vicepresidenciaGerenciaAlta: riesgoData.vicepresidenciaGerenciaAlta ?? null,
+            gerencia: riesgoData.gerencia ?? null
+        };
         if (evaluacion && typeof evaluacion === 'object') {
             const e = evaluacion as Record<string, unknown>;
             data.evaluacion = {
@@ -264,7 +289,6 @@ export const createRiesgo = async (req: Request, res: Response) => {
                 }
             };
         }
-
         if (causas) {
             data.causas = {
                 create: causas.map((causa: any) => ({
@@ -272,62 +296,74 @@ export const createRiesgo = async (req: Request, res: Response) => {
                     fuenteCausa: causa.fuenteCausa,
                     frecuencia: causa.frecuencia,
                     seleccionada: causa.seleccionada,
-                    controles: causa.controles ? {
-                        create: causa.controles
-                    } : undefined
+                    controles: causa.controles ? { create: causa.controles } : undefined
                 }))
             };
         }
 
-        const nuevoRiesgo = await prisma.riesgo.create({
-            data,
-            include: {
-                evaluacion: true,
-                causas: true
+        let nuevoRiesgo: any;
+        try {
+            nuevoRiesgo = await prisma.riesgo.create({
+                data,
+                include: { evaluacion: true, causas: true },
+            });
+        } catch (e: any) {
+            if (e?.code === 'P2002') {
+                const agg2 = await prisma.riesgo.aggregate({ where: { procesoId }, _max: { numero: true } });
+                const nextNumero2 = (agg2._max?.numero ?? 0) + 1;
+                data.numero = nextNumero2;
+                data.numeroIdentificacion = `${nextNumero2}${sigla}`;
+                nuevoRiesgo = await prisma.riesgo.create({
+                    data,
+                    include: { evaluacion: true, causas: true },
+                });
+            } else {
+                throw e;
             }
-        });
-        
-        // OPTIMIZADO: Invalidar caché relacionado
-        await redisSet(`riesgos:proceso:${riesgoData.procesoId}:page:1:size:50:causas:false`, null, 0);
-        
+        }
+
+        invalidarCacheRiesgosProceso(riesgoData.procesoId).catch(() => {});
         res.json(nuevoRiesgo);
     } catch (error: any) {
-        // Handle unique constraint violations
         if (error.code === 'P2002') {
-            const field = error.meta?.target?.[0] || 'unknown';
-            return res.status(400).json({ 
-                error: `Duplicate ${field}: A risk with this ${field} already exists for this process`,
+            return res.status(500).json({
+                error: 'No se pudo crear el riesgo por número duplicado. Espere un momento e intente de nuevo.',
                 details: error.message
             });
         }
-        
-        // Handle foreign key constraint violations
         if (error.code === 'P2003') {
-            return res.status(400).json({ 
+            return res.status(400).json({
                 error: 'Invalid reference: Process or related entity does not exist',
                 details: error.message
             });
         }
-        
         res.status(500).json({ error: 'Error creating riesgo', details: error.message });
     }
 };
 
 export const updateRiesgo = async (req: Request, res: Response) => {
     const id = Number(req.params.id);
-    let { evaluacion, causas, priorizacion, ...data } = req.body;
+    let { evaluacion, causas, priorizacion, ...body } = req.body;
     try {
-        if (data.procesoId) data.procesoId = Number(data.procesoId);
+        const data: any = {};
+        if (body.procesoId !== undefined) data.procesoId = Number(body.procesoId);
+        if (body.numero !== undefined) data.numero = Number(body.numero);
+        if (body.descripcion !== undefined) data.descripcion = body.descripcion;
+        if (body.clasificacion !== undefined) data.clasificacion = body.clasificacion;
+        if (body.numeroIdentificacion !== undefined) data.numeroIdentificacion = body.numeroIdentificacion;
+        if (body.tipoRiesgoId !== undefined) data.tipoRiesgoId = body.tipoRiesgoId != null ? Number(body.tipoRiesgoId) : null;
+        if (body.subtipoRiesgoId !== undefined) data.subtipoRiesgoId = body.subtipoRiesgoId != null ? Number(body.subtipoRiesgoId) : null;
+        if (body.objetivoId !== undefined) data.objetivoId = body.objetivoId != null ? Number(body.objetivoId) : null;
+        if (body.origen !== undefined) data.origen = body.origen;
+        if (body.vicepresidenciaGerenciaAlta !== undefined) data.vicepresidenciaGerenciaAlta = body.vicepresidenciaGerenciaAlta;
+        if (body.gerencia !== undefined) data.gerencia = body.gerencia;
 
-        // Mover campos de evaluación residual si vienen en el body raíz o en evaluacion
         const evaluacionFields = ['riesgoResidual', 'probabilidadResidual', 'impactoResidual', 'nivelRiesgoResidual'];
         const evaluacionUpdate: any = { ...evaluacion };
         evaluacionFields.forEach(field => {
-            if (data[field] !== undefined) {
-                evaluacionUpdate[field] = data[field];
-                delete data[field];
+            if (body[field] !== undefined) {
+                evaluacionUpdate[field] = body[field];
             }
-            // También verificar si viene en el objeto evaluacion
             if (evaluacion && evaluacion[field] !== undefined) {
                 evaluacionUpdate[field] = evaluacion[field];
             }
@@ -335,10 +371,7 @@ export const updateRiesgo = async (req: Request, res: Response) => {
 
         const updated = await prisma.riesgo.update({
             where: { id },
-            data: {
-                ...data,
-                updatedAt: new Date()
-            }
+            data: { ...data, updatedAt: new Date() }
         });
 
         // Actualizar evaluación si se proporciona (crear si no existe)
@@ -376,10 +409,10 @@ export const updateRiesgo = async (req: Request, res: Response) => {
             await recalcularRiesgoInherenteDesdeCausas(id);
         }
 
-        // OPTIMIZADO: Invalidar caché relacionado
+        // OPTIMIZADO: Invalidar caché relacionado (con y sin causas para que el frontend vea cambios)
         await redisSet(`riesgo:${id}`, null, 0);
         if (updated.procesoId) {
-            await redisSet(`riesgos:proceso:${updated.procesoId}:page:1:size:50:causas:false`, null, 0);
+            await invalidarCacheRiesgosProceso(updated.procesoId);
         }
 
         res.json(updated);
@@ -402,7 +435,7 @@ export const deleteRiesgo = async (req: Request, res: Response) => {
         // OPTIMIZADO: Invalidar caché relacionado
         await redisSet(`riesgo:${id}`, null, 0);
         if (riesgo?.procesoId) {
-            await redisSet(`riesgos:proceso:${riesgo.procesoId}:page:1:size:50:causas:false`, null, 0);
+            await invalidarCacheRiesgosProceso(riesgo.procesoId);
         }
         
         res.json({ message: 'Riesgo deleted' });
@@ -510,6 +543,22 @@ export const getPuntosMapa = async (req: Request, res: Response) => {
             }
         });
 
+        // Riesgos que tienen al menos una causa con control (CONTROL o AMBOS): residual se calcula; el resto residual = inherente
+        const riesgoIdsConControl = new Set<number>();
+        try {
+            const causasConControl = await prisma.causaRiesgo.findMany({
+                where: {
+                    tipoGestion: { in: ['CONTROL', 'AMBOS'] },
+                    gestion: { not: null },
+                    riesgoId: { in: riesgos.map(r => r.id) }
+                },
+                select: { riesgoId: true }
+            });
+            causasConControl.forEach(c => riesgoIdsConControl.add(c.riesgoId));
+        } catch (_) {
+            // Si falla la consulta, todos se tratan como sin control (residual = inherente)
+        }
+
         // Incluir TODOS los riesgos con evaluación (no filtrar por valores específicos)
         // IMPORTANTE: Solo generar UN punto por riesgo (evitar duplicados)
         const riesgosProcesados = new Set<number>();
@@ -535,7 +584,7 @@ export const getPuntosMapa = async (req: Request, res: Response) => {
                     !isNaN(impGuardado) && impGuardado >= 1 && impGuardado <= 5;
 
                 // Prioridad 1: Usar probabilidad e impacto guardados cuando son válidos (1-5).
-                // Representan los ejes reales del mapa: X = Frecuencia (probabilidad), Y = Impacto.
+                // Ejes del mapa: X = Frecuencia (probabilidad), Y = Impacto. Misma convención en inherente y residual.
                 if (riesgoInherente && riesgoInherente > 0 && !isNaN(riesgoInherente) && tieneEjesGuardados) {
                     probabilidad = Math.round(probGuardada);
                     impacto = Math.round(impGuardado);
@@ -617,106 +666,112 @@ export const getPuntosMapa = async (req: Request, res: Response) => {
                     }
                 }
                 
-                // Calcular valores residuales
-                // PRIORIDAD 1: Si hay riesgoResidual en la evaluación (clasificación residual global), calcular desde ahí
+                // Calcular valores residuales. Ejes: X = Frecuencia (probabilidad), Y = Impacto.
+                // Si el riesgo NO tiene ninguna causa con control (solo PLAN no cuenta), residual = inherente → misma ubicación.
+                const sinControles = !riesgoIdsConControl.has(r.id);
+
                 let probabilidadResidual: number | null = null;
                 let impactoResidual: number | null = null;
-                
-                const riesgoResidual = r.evaluacion!.riesgoResidual;
-                if (riesgoResidual && riesgoResidual > 0 && !isNaN(riesgoResidual)) {
-                    // Convertir riesgoResidual a probabilidad e impacto (mismo algoritmo que para inherente)
-                    let mejorProbRes = 1;
-                    let mejorImpRes = 1;
-                    let encontradoExacto = false;
-                    
-                    // Primero buscar coincidencia exacta
-                    for (let prob = 1; prob <= 5; prob++) {
-                        for (let imp = 1; imp <= 5; imp++) {
-                            const valor = prob === 2 && imp === 2 ? 3.99 : prob * imp;
-                            if (Math.abs(valor - riesgoResidual) < 0.01) {
-                                mejorProbRes = prob;
-                                mejorImpRes = imp;
-                                encontradoExacto = true;
-                                break;
-                            }
-                        }
-                        if (encontradoExacto) break;
-                    }
-                    
-                    // Si no hay coincidencia exacta, buscar el más cercano >= riesgoResidual
-                    if (!encontradoExacto) {
-                        let menorDiferencia = Infinity;
-                        for (let prob = 1; prob <= 5; prob++) {
-                            for (let imp = 1; imp <= 5; imp++) {
-                                const valor = prob === 2 && imp === 2 ? 3.99 : prob * imp;
-                                
-                                // Priorizar valores que sean >= riesgoResidual
-                                if (valor >= riesgoResidual) {
-                                    const diferencia = valor - riesgoResidual;
-                                    if (diferencia < menorDiferencia) {
-                                        menorDiferencia = diferencia;
-                                        mejorProbRes = prob;
-                                        mejorImpRes = imp;
-                                    }
-                                }
-                            }
-                        }
-                        
-                        // Si aún no hay valor >=, usar el más cercano
-                        if (menorDiferencia === Infinity) {
+
+                if (sinControles) {
+                    probabilidadResidual = probabilidad;
+                    impactoResidual = impacto;
+                } else {
+                    // Prioridad 1: Usar BY y BZ guardados (frecuencia residual = X, impacto residual = Y).
+                    // Así la ubicación en el mapa coincide con la tabla: X = frecuencia residual, Y = impacto residual.
+                    const probResEval = r.evaluacion!.probabilidadResidual;
+                    const impResEval = r.evaluacion!.impactoResidual;
+                    if (probResEval != null && impResEval != null && !isNaN(Number(probResEval)) && !isNaN(Number(impResEval))) {
+                        probabilidadResidual = Math.max(1, Math.min(5, Math.round(Number(probResEval))));
+                        impactoResidual = Math.max(1, Math.min(5, Math.round(Number(impResEval))));
+                    } else {
+                        // Fallback: descomponer riesgoResidual en (prob, imp) solo si no hay ejes guardados
+                        const riesgoResidualVal = r.evaluacion!.riesgoResidual;
+                        if (riesgoResidualVal && riesgoResidualVal > 0 && !isNaN(riesgoResidualVal)) {
+                            let mejorProbRes = 1;
+                            let mejorImpRes = 1;
+                            let encontradoExacto = false;
                             for (let prob = 1; prob <= 5; prob++) {
                                 for (let imp = 1; imp <= 5; imp++) {
                                     const valor = prob === 2 && imp === 2 ? 3.99 : prob * imp;
-                                    const diferencia = Math.abs(riesgoResidual - valor);
-                                    if (diferencia < menorDiferencia) {
-                                        menorDiferencia = diferencia;
+                                    if (Math.abs(valor - riesgoResidualVal) < 0.01) {
                                         mejorProbRes = prob;
                                         mejorImpRes = imp;
+                                        encontradoExacto = true;
+                                        break;
+                                    }
+                                }
+                                if (encontradoExacto) break;
+                            }
+                            if (!encontradoExacto) {
+                                let menorDiferencia = Infinity;
+                                for (let prob = 1; prob <= 5; prob++) {
+                                    for (let imp = 1; imp <= 5; imp++) {
+                                        const valor = prob === 2 && imp === 2 ? 3.99 : prob * imp;
+                                        if (valor >= riesgoResidualVal) {
+                                            const diferencia = valor - riesgoResidualVal;
+                                            if (diferencia < menorDiferencia) {
+                                                menorDiferencia = diferencia;
+                                                mejorProbRes = prob;
+                                                mejorImpRes = imp;
+                                            }
+                                        }
+                                    }
+                                }
+                                if (menorDiferencia === Infinity) {
+                                    for (let prob = 1; prob <= 5; prob++) {
+                                        for (let imp = 1; imp <= 5; imp++) {
+                                            const valor = prob === 2 && imp === 2 ? 3.99 : prob * imp;
+                                            const diferencia = Math.abs(riesgoResidualVal - valor);
+                                            if (diferencia < menorDiferencia) {
+                                                menorDiferencia = diferencia;
+                                                mejorProbRes = prob;
+                                                mejorImpRes = imp;
+                                            }
+                                        }
                                     }
                                 }
                             }
+                            probabilidadResidual = mejorProbRes;
+                            impactoResidual = mejorImpRes;
+                        } else {
+                            probabilidadResidual = null;
+                            impactoResidual = null;
                         }
                     }
-                    
-                    probabilidadResidual = mejorProbRes;
-                    impactoResidual = mejorImpRes;
-                } else {
-                    // PRIORIDAD 2: Si no hay riesgoResidual, usar valores residuales directos de la evaluación
-                    probabilidadResidual = r.evaluacion!.probabilidadResidual 
-                        ? Math.max(1, Math.min(5, Math.round(Number(r.evaluacion!.probabilidadResidual))))
-                        : null;
-                    impactoResidual = r.evaluacion!.impactoResidual
-                        ? Math.max(1, Math.min(5, Math.round(Number(r.evaluacion!.impactoResidual))))
-                        : null;
-                    
+                    if (!probabilidadResidual || !impactoResidual) {
+                        probabilidadResidual = probabilidad;
+                        impactoResidual = impacto;
+                    }
                 }
                 
-                // PRIORIDAD 3: Si aún no hay valores residuales, usar inherentes
-                if (!probabilidadResidual || !impactoResidual) {
-                    probabilidadResidual = probabilidad;
-                    impactoResidual = impacto;
-                }
-                
+                // Calificación residual del riesgo (máx. de causas con control) — misma fuente que mapa y resumen
+                const riesgoResidualEval = r.evaluacion!.riesgoResidual;
+                const nivelRiesgoResidualEval = r.evaluacion!.nivelRiesgoResidual;
+                const calResidualNum =
+                    probabilidadResidual != null && impactoResidual != null
+                        ? (probabilidadResidual === 2 && impactoResidual === 2 ? 3.99 : probabilidadResidual * impactoResidual)
+                        : (riesgoResidualEval != null ? Number(riesgoResidualEval) : undefined);
+
                 return {
                     riesgoId: r.id,
                     descripcion: r.descripcion,
                     probabilidad,
                     impacto,
 
-                    // Residual
+                    // Residual (posición en mapa y calificación final)
                     probabilidadResidual,
                     impactoResidual,
+                    riesgoResidual: riesgoResidualEval != null ? Number(riesgoResidualEval) : calResidualNum,
+                    nivelRiesgoResidual: nivelRiesgoResidualEval ?? undefined,
 
                     nivelRiesgo: r.evaluacion!.nivelRiesgo,
                     clasificacion: r.clasificacion,
                     numero: r.numero,
-                    siglaGerencia: r.proceso?.sigla || r.siglaGerencia || '', // Usar sigla del proceso, fallback a siglaGerencia por compatibilidad
+                    siglaGerencia: r.proceso?.sigla || '',
                     numeroIdentificacion: r.numeroIdentificacion || `${r.numero || r.id}${r.proceso?.sigla || 'R'}`,
                     procesoId: r.procesoId,
-                    procesoNombre: r.proceso?.nombre || 'Proceso desconocido',
-                    // Campos adicionales del riesgo
-                    zona: r.zona || null,
-                    tipologiaNivelI: r.tipologiaNivelI || null
+                    procesoNombre: r.proceso?.nombre || 'Proceso desconocido'
                 };
             });
 
@@ -928,29 +983,103 @@ export async function recalcularRiesgoInherenteDesdeCausas(riesgoId: number): Pr
 export const createCausa = async (req: Request, res: Response) => {
     try {
         const { riesgoId, descripcion, fuenteCausa, frecuencia, seleccionada, tipoGestion, gestion } = req.body;
-        
-        if (!riesgoId || !descripcion) {
-            return res.status(400).json({ error: 'riesgoId y descripcion son requeridos' });
+        const riesgoIdNum = Number(riesgoId);
+
+        if (!riesgoId || (riesgoIdNum !== 0 && !riesgoIdNum)) {
+            return res.status(400).json({ error: 'riesgoId es requerido y debe ser un número válido' });
+        }
+        const descripcionTrim = String(descripcion ?? '').trim() || 'Causa';
+        if (!descripcionTrim) {
+            return res.status(400).json({ error: 'descripcion es requerida' });
         }
 
-        const causa = await prisma.causaRiesgo.create({
-            data: {
-                riesgoId: Number(riesgoId),
-                descripcion,
-                fuenteCausa: fuenteCausa || null,
-                frecuencia: frecuencia ? String(frecuencia) : null,
-                seleccionada: seleccionada !== undefined ? seleccionada : true,
-                tipoGestion: tipoGestion || null,
-                gestion: gestion || null
-            }
+        // Verificar que el riesgo existe antes de crear la causa (evita P2003 genérico)
+        const riesgoExiste = await prisma.riesgo.findUnique({
+            where: { id: riesgoIdNum },
+            select: { id: true }
         });
-        
-        // Recalcular automáticamente riesgoInherente, probabilidad e impactoGlobal
-        await recalcularRiesgoInherenteDesdeCausas(Number(riesgoId));
-        
+        if (!riesgoExiste) {
+            return res.status(404).json({ error: `Riesgo con id ${riesgoIdNum} no encontrado` });
+        }
+
+        const dataCausa: {
+            riesgoId: number;
+            descripcion: string;
+            fuenteCausa: string | null;
+            frecuencia: string | null;
+            seleccionada: boolean;
+            tipoGestion?: string | null;
+            gestion?: object | null;
+        } = {
+            riesgoId: riesgoIdNum,
+            descripcion: descripcionTrim,
+            fuenteCausa: fuenteCausa != null && String(fuenteCausa).trim() !== '' ? String(fuenteCausa).trim() : null,
+            frecuencia: frecuencia != null && String(frecuencia).trim() !== '' ? String(frecuencia) : null,
+            seleccionada: seleccionada !== undefined ? Boolean(seleccionada) : true,
+        };
+        if (tipoGestion != null && String(tipoGestion).trim() !== '') dataCausa.tipoGestion = String(tipoGestion);
+        if (gestion != null && typeof gestion === 'object') dataCausa.gestion = gestion;
+
+        let causa: any;
+        try {
+            causa = await prisma.causaRiesgo.create({
+                data: dataCausa
+            });
+        } catch (createErr: any) {
+            // P2002 = Unique constraint failed. Si es en (id), la secuencia de PostgreSQL está desincronizada.
+            const isIdConstraint = createErr?.code === 'P2002' && (
+                (Array.isArray(createErr?.meta?.target) && createErr.meta.target.includes('id')) ||
+                String(createErr?.message || '').includes('`id`')
+            );
+            if (isIdConstraint) {
+                try {
+                    await prisma.$executeRawUnsafe(
+                        `SELECT setval(pg_get_serial_sequence('"CausaRiesgo"', 'id'), COALESCE((SELECT MAX(id) FROM "CausaRiesgo"), 1) + 1)`
+                    );
+                    causa = await prisma.causaRiesgo.create({
+                        data: dataCausa
+                    });
+                } catch (retryErr: any) {
+                    console.error('[createCausa] retry after sequence reset failed', retryErr?.message);
+                    throw createErr;
+                }
+            } else {
+                throw createErr;
+            }
+        }
+
+        // Recalcular riesgo inherente (no bloquear respuesta si falla)
+        recalcularRiesgoInherenteDesdeCausas(riesgoIdNum).catch((err) => {
+            console.error('[createCausa] recalcularRiesgoInherenteDesdeCausas', err?.message || err);
+        });
+
+        // Si la causa tiene control (CONTROL o AMBOS), recalcular calificación residual y esperar para devolver datos ya guardados en BD
+        if (dataCausa.tipoGestion === 'CONTROL' || dataCausa.tipoGestion === 'AMBOS') {
+            await recalcularResidualPorRiesgo(riesgoIdNum).catch((err) => {
+                console.error('[createCausa] recalcularResidualPorRiesgo', err?.message || err);
+            });
+            // Re-fetch la causa para devolver gestion con frecuenciaResidual/impactoResidual ya calculados
+            causa = await prisma.causaRiesgo.findUnique({ where: { id: causa.id } }) ?? causa;
+        }
+
+        // Invalidar caché del listado de riesgos del proceso para que el frontend vea las causas nuevas
+        const riesgo = await prisma.riesgo.findUnique({
+            where: { id: riesgoIdNum },
+            select: { procesoId: true }
+        });
+        if (riesgo?.procesoId) await invalidarCacheRiesgosProceso(riesgo.procesoId);
+
         res.status(201).json(causa);
-    } catch (error) {
-        res.status(500).json({ error: 'Error creating causa' });
+    } catch (error: any) {
+        console.error('[createCausa]', error?.message || error);
+        console.error('[createCausa] body recibido:', { riesgoId: req.body?.riesgoId, descripcion: req.body?.descripcion ? '(presente)' : '(vacío)', frecuencia: req.body?.frecuencia });
+        const msg = error?.message || String(error);
+        const code = error?.code;
+        res.status(500).json({
+            error: 'Error creating causa',
+            details: msg,
+            ...(code ? { code } : {})
+        });
     }
 };
 
@@ -978,14 +1107,27 @@ export const updateCausa = async (req: Request, res: Response) => {
             where: { id },
             data: updateData
         });
-        
-        // Recalcular automáticamente riesgoInherente, probabilidad e impactoGlobal
-        // Solo si se modificó frecuencia o si puede afectar el cálculo
+
+        // Recalcular riesgo inherente si cambió frecuencia o descripción
         if (frecuencia !== undefined || descripcion !== undefined) {
             await recalcularRiesgoInherenteDesdeCausas(updated.riesgoId);
         }
-        
-        res.json(updated);
+
+        // Recalcular calificación residual cuando se guarda/edita un control (usa parámetros del admin)
+        let resultado: typeof updated = updated;
+        if (tipoGestion !== undefined || gestion !== undefined) {
+            await recalcularResidualPorRiesgo(updated.riesgoId).catch(() => {});
+            // Devolver la causa con gestion ya recalculado (frecuenciaResidual, impactoResidual, etc.)
+            resultado = await prisma.causaRiesgo.findUnique({ where: { id: updated.id } }) ?? updated;
+        }
+
+        const riesgo = await prisma.riesgo.findUnique({
+            where: { id: updated.riesgoId },
+            select: { procesoId: true }
+        });
+        if (riesgo?.procesoId) await invalidarCacheRiesgosProceso(riesgo.procesoId);
+
+        res.json(resultado);
     } catch (error) {
         res.status(500).json({ error: 'Error updating causa' });
     }
@@ -1006,10 +1148,17 @@ export const deleteCausa = async (req: Request, res: Response) => {
         await prisma.causaRiesgo.delete({
             where: { id }
         });
-        
-        // Recalcular automáticamente riesgoInherente, probabilidad e impactoGlobal
+
         await recalcularRiesgoInherenteDesdeCausas(riesgoId);
-        
+        // Recalcular residual: si ya no queda ninguna causa con control, residual = inherente
+        await recalcularResidualPorRiesgo(riesgoId).catch(() => {});
+
+        const riesgo = await prisma.riesgo.findUnique({
+            where: { id: riesgoId },
+            select: { procesoId: true }
+        });
+        if (riesgo?.procesoId) await invalidarCacheRiesgosProceso(riesgo.procesoId);
+
         res.json({ message: 'Causa eliminada correctamente', id });
     } catch (error: any) {
         // Si es un error de Prisma (causa no encontrada)

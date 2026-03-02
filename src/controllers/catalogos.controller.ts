@@ -27,20 +27,20 @@ export const getListasValores = async (req: Request, res: Response) => {
 export const getTipologias = async (req: Request, res: Response) => {
     try {
         const tipologias = await prisma.tipoRiesgo.findMany({
-            include: { subtipos: true }
+            include: { subtipos: { orderBy: { id: 'asc' } } }
         });
-        // Return tipos de riesgo directly with their subtipos
         res.json(tipologias);
-    } catch (error) {
-        res.status(500).json({ error: 'Error fetching tipologias' });
+    } catch (error: any) {
+        console.error('[catalogos/getTipologias]', error?.message || error);
+        res.status(500).json({ error: 'Error al cargar tipologías' });
     }
 };
 
 export const createTipologia = async (req: Request, res: Response) => {
     try {
-        const { nombre, codigo, descripcion } = req.body;
+        const { nombre, descripcion } = req.body;
         const newTipologia = await prisma.tipoRiesgo.create({
-            data: { nombre, codigo, descripcion }
+            data: { nombre: String(nombre).trim(), descripcion: descripcion != null ? String(descripcion).trim() || null : null }
         });
         res.status(201).json(newTipologia);
     } catch (error) {
@@ -51,10 +51,13 @@ export const createTipologia = async (req: Request, res: Response) => {
 export const updateTipologia = async (req: Request, res: Response) => {
     const id = Number(req.params.id);
     try {
-        const { nombre, codigo, descripcion } = req.body;
+        const { nombre, descripcion } = req.body;
         const updated = await prisma.tipoRiesgo.update({
             where: { id },
-            data: { nombre, codigo, descripcion }
+            data: {
+                ...(nombre != null && nombre !== '' && { nombre: String(nombre).trim() }),
+                ...(descripcion !== undefined && { descripcion: descripcion != null ? String(descripcion).trim() || null : null })
+            }
         });
         res.json(updated);
     } catch (error) {
@@ -74,41 +77,57 @@ export const deleteTipologia = async (req: Request, res: Response) => {
     }
 };
 
+export const getSubtipos = async (req: Request, res: Response) => {
+    try {
+        const subtipos = await prisma.subtipoRiesgo.findMany({
+            orderBy: [{ tipoRiesgoId: 'asc' }, { id: 'asc' }]
+        });
+        res.json(subtipos);
+    } catch (error: any) {
+        console.error('[catalogos/getSubtipos]', error?.message || error);
+        res.status(500).json({ error: 'Error al cargar subtipos' });
+    }
+};
+
 export const createSubtipo = async (req: Request, res: Response) => {
     try {
-        const { tipoRiesgoId, nombre, descripcion, codigo } = req.body;
+        const { tipoRiesgoId, nombre, descripcion } = req.body;
         if (!tipoRiesgoId || !nombre) {
             return res.status(400).json({ error: 'tipoRiesgoId y nombre son requeridos' });
         }
+        const tipoId = Number(tipoRiesgoId);
         const subtipo = await prisma.subtipoRiesgo.create({
             data: {
-                tipoRiesgoId: Number(tipoRiesgoId),
-                nombre,
-                descripcion: descripcion || null,
-                codigo: codigo || null
+                tipoRiesgoId: tipoId,
+                nombre: String(nombre).trim(),
+                descripcion: descripcion != null ? String(descripcion).trim() || null : null
             }
         });
         res.status(201).json(subtipo);
-    } catch (error) {
-        res.status(500).json({ error: 'Error creating subtipo' });
+    } catch (error: any) {
+        console.error('[catalogos/createSubtipo]', error?.message || error);
+        const isUnique = error?.code === 'P2002';
+        const msg = isUnique ? 'Ya existe un subtipo con ese nombre en este tipo de riesgo. Elija otro nombre.' : 'Error al crear subtipo.';
+        res.status(isUnique ? 400 : 500).json({ error: msg });
     }
 };
 
 export const updateSubtipo = async (req: Request, res: Response) => {
     const id = Number(req.params.id);
     try {
-        const { nombre, descripcion, codigo } = req.body;
+        const { nombre, descripcion } = req.body;
         const updated = await prisma.subtipoRiesgo.update({
             where: { id },
             data: {
-                ...(nombre && { nombre }),
-                ...(descripcion !== undefined && { descripcion }),
-                ...(codigo !== undefined && { codigo })
+                ...(nombre != null && nombre !== '' && { nombre: String(nombre).trim() }),
+                ...(descripcion !== undefined && { descripcion: descripcion != null ? String(descripcion).trim() || null : null })
             }
         });
         res.json(updated);
-    } catch (error) {
-        res.status(500).json({ error: 'Error updating subtipo' });
+    } catch (error: any) {
+        console.error('[catalogos/updateSubtipo]', error?.message || error);
+        const msg = (error?.code === 'P2002') ? 'Ya existe un subtipo con ese nombre en este tipo de riesgo.' : 'Error al actualizar subtipo.';
+        res.status(500).json({ error: msg });
     }
 };
 
@@ -229,13 +248,8 @@ export const deleteObjetivo = async (req: Request, res: Response) => {
     }
 };
 
-export const getFormulas = async (req: Request, res: Response) => {
-    try {
-        const formulas = await prisma.formula.findMany();
-        res.json(formulas);
-    } catch (error) {
-        res.status(500).json({ error: 'Error fetching formulas' });
-    }
+export const getFormulas = async (_req: Request, res: Response) => {
+    res.json([]);
 };
 
 export const getFrecuencias = async (req: Request, res: Response) => {
@@ -642,15 +656,14 @@ export const updateMapaConfig = async (req: Request, res: Response) => {
     }
 };
 
-export const getVicepresidencias = async (req: Request, res: Response) => {
-    // Return hardcoded or dynamic lists for now since there is no model
+export const getVicepresidencias = async (_req: Request, res: Response) => {
     const vps = [
-        { id: 1, nombre: 'Vicepresidencia Ejecutiva', sigla: 'VPE' },
-        { id: 2, nombre: 'Vicepresidencia de Operaciones', sigla: 'VPO' },
-        { id: 3, nombre: 'Vicepresidencia Comercial', sigla: 'VPC' },
-        { id: 4, nombre: 'Vicepresidencia Financiera', sigla: 'VPF' },
-        { id: 5, nombre: 'Vicepresidencia de Tecnología', sigla: 'VPT' },
-        { id: 6, nombre: 'Vicepresidencia de Talento Humano', sigla: 'VPTH' },
+        { id: 1, nombre: 'Vicepresidencia Ejecutiva' },
+        { id: 2, nombre: 'Vicepresidencia de Operaciones' },
+        { id: 3, nombre: 'Vicepresidencia Comercial' },
+        { id: 4, nombre: 'Vicepresidencia Financiera' },
+        { id: 5, nombre: 'Vicepresidencia de Tecnología' },
+        { id: 6, nombre: 'Vicepresidencia de Talento Humano' },
     ];
     res.json(vps);
 };

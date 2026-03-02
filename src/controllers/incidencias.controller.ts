@@ -33,6 +33,7 @@ export const getIncidencias = async (req: Request, res: Response) => {
       orderBy: { fechaOcurrencia: 'desc' },
       include: {
         riesgo: { select: { id: true, descripcion: true, numeroIdentificacion: true, procesoId: true } },
+        causaRiesgo: { select: { id: true, descripcion: true, riesgoId: true } },
         proceso: { select: { id: true, nombre: true, sigla: true } },
         responsable: { select: { id: true, nombre: true, email: true } }
       }
@@ -96,6 +97,7 @@ export const createIncidencia = async (req: Request, res: Response) => {
   try {
     const {
       riesgoId,
+      causaRiesgoId,
       procesoId,
       codigo,
       titulo,
@@ -120,6 +122,7 @@ export const createIncidencia = async (req: Request, res: Response) => {
     const incidencia = await prisma.incidencia.create({
       data: {
         ...(finalRiesgoId && { riesgoId: Number(finalRiesgoId) }),
+        ...(causaRiesgoId != null && { causaRiesgoId: Number(causaRiesgoId) }),
         ...(procesoId && { procesoId: Number(procesoId) }),
         codigo: codigo || `INC-${Date.now()}`,
         titulo,
@@ -146,6 +149,8 @@ export const updateIncidencia = async (req: Request, res: Response) => {
     const incidenciaId = Number(req.params.id);
     const {
       codigo,
+      riesgoId,
+      causaRiesgoId,
       titulo,
       descripcion,
       estado,
@@ -158,10 +163,11 @@ export const updateIncidencia = async (req: Request, res: Response) => {
       impactosMaterializacion
     } = req.body;
     
-    // Calcular impacto promedio si hay cambios
     let updateData: any = {};
 
     if (codigo) updateData.codigo = codigo;
+    if (riesgoId !== undefined) updateData.riesgoId = riesgoId != null ? Number(riesgoId) : null;
+    if (causaRiesgoId !== undefined) updateData.causaRiesgoId = causaRiesgoId != null ? Number(causaRiesgoId) : null;
     if (titulo) updateData.titulo = titulo;
     if (descripcion) updateData.descripcion = descripcion;
     if (estado) updateData.estado = estado;

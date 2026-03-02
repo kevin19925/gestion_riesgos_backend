@@ -1,16 +1,31 @@
 /**
  * Servicio de Recálculo Residual
- * 
- * Recalcula todos los valores residuales usando la configuración activa
+ *
+ * Alineado con la plantilla Excel "Herramienta de gestión de riesgos Planificación Financiera Pame.xlsm":
+ * - BY = Frecuencia residual (1..5), BZ = Impacto residual (1..5), por causa.
+ * - CA = Calificación de la causa residual: si BY=2 y BZ=2 → 3.99; si no → BY×BZ.
+ * - CB = Por riesgo: causa con mayor CA; el mapa usa la BY y BZ de esa causa (probabilidadResidual, impactoResidual en EvaluacionRiesgo).
+ *
+ * Fórmulas de ajuste (columnas W/AD en Excel):
+ * - Si control aplica a FRECUENCIA o AMBAS: reducir valor por porcentaje de mitigación (tabla admin).
+ * - Si control aplica a IMPACTO y evaluación Efectivo/Altamente Efectivo: reducción fija 34% sobre frecuencia.
+ * - Si control aplica a FRECUENCIA y evaluación Efectivo/Altamente Efectivo: reducción fija 34% sobre impacto.
+ * Redondeo: REDONDEAR.MAS(..., 0) → Math.ceil. Resultado acotado 1..5.
+ *
+ * Recalcula usando la configuración activa (pesos, rangos evaluación, tabla mitigación, rangos nivel).
+ * Actualiza CausaRiesgo.gestion y EvaluacionRiesgo para el mapa residual.
  */
 
 import prisma from '../prisma';
+
+const LOG_PREFIX = '[RecalcResidual]';
 import {
   getConfiguracionActiva,
   getPesosCriterios,
   getRangosEvaluacion,
   getTablaMitigacion,
-  getRangosNivelRiesgo
+  getRangosNivelRiesgo,
+  getPorcentajeDimensionCruzada
 } from './configuracionResidual.service';
 
 interface ResultadoRecalculo {
@@ -103,33 +118,73 @@ function determinarNivelRiesgoResidual(
 }
 
 /**
- * Calcula frecuencia residual
+ * Calcula frecuencia residual (BY).
+ * Si control aplica a FRECUENCIA o AMBAS: reduce por porcentajeMitigacion (tabla admin).
+ * Si control aplica a IMPACTO y evaluación Efectivo/Altamente Efectivo: reduce por porcentajeDimensionCruzada (admin).
  */
-function calcularFrecuenciaResidual(
+export function calcularFrecuenciaResidual(
   frecuenciaInherente: number,
   porcentajeMitigacion: number,
-  tipoMitigacion: string
+  tipoMitigacion: string,
+  evaluacionDefinitiva: string,
+  porcentajeDimensionCruzada: number
 ): number {
   if (tipoMitigacion === 'FRECUENCIA' || tipoMitigacion === 'AMBAS') {
     const residual = frecuenciaInherente - (frecuenciaInherente * porcentajeMitigacion);
-    return Math.max(1, Math.ceil(residual));
+    return Math.max(1, Math.min(5, Math.ceil(residual)));
   }
-  return frecuenciaInherente;
+  if (tipoMitigacion === 'IMPACTO' && (evaluacionDefinitiva === 'Efectivo' || evaluacionDefinitiva === 'Altamente Efectivo')) {
+    const residual = frecuenciaInherente - (frecuenciaInherente * porcentajeDimensionCruzada);
+    return Math.max(1, Math.min(5, Math.ceil(residual)));
+  }
+  return Math.max(1, Math.min(5, frecuenciaInherente));
 }
 
 /**
- * Calcula impacto residual
+ * Calcula impacto residual (BZ).
+ * Si control aplica a IMPACTO o AMBAS: reduce por porcentajeMitigacion (tabla admin).
+ * Si control aplica a FRECUENCIA y evaluación Efectivo/Altamente Efectivo: reduce por porcentajeDimensionCruzada (admin).
  */
-function calcularImpactoResidual(
+export function calcularImpactoResidual(
   impactoInherente: number,
   porcentajeMitigacion: number,
-  tipoMitigacion: string
+  tipoMitigacion: string,
+  evaluacionDefinitiva: string,
+  porcentajeDimensionCruzada: number
 ): number {
   if (tipoMitigacion === 'IMPACTO' || tipoMitigacion === 'AMBAS') {
     const residual = impactoInherente - (impactoInherente * porcentajeMitigacion);
-    return Math.max(1, Math.ceil(residual));
+    return Math.max(1, Math.min(5, Math.ceil(residual)));
   }
-  return impactoInherente;
+  if (tipoMitigacion === 'FRECUENCIA' && (evaluacionDefinitiva === 'Efectivo' || evaluacionDefinitiva === 'Altamente Efectivo')) {
+    const residual = impactoInherente - (impactoInherente * porcentajeDimensionCruzada);
+    return Math.max(1, Math.min(5, Math.ceil(residual)));
+  }
+  return Math.max(1, Math.min(5, impactoInherente));
+}
+
+/** Catálogo de frecuencias para resolver causa.frecuencia a escala 1-5 */
+type FrecuenciaCatalogItem = { id: number; label: string; peso: number | null };
+
+/**
+ * Resuelve la frecuencia de la causa (catálogo) a un valor 1-5 para usar como frecuencia inherente (BY).
+ * Misma lógica que recalcularRiesgoInherenteDesdeCausas.
+ */
+function resolverFrecuenciaCausaA1_5(
+  causaFrecuencia: string | null | undefined,
+  frecuenciasCatalog: FrecuenciaCatalogItem[]
+): number | null {
+  if (causaFrecuencia == null || String(causaFrecuencia).trim() === '') return null;
+  const s = String(causaFrecuencia).trim();
+  if (/^\d+$/.test(s)) {
+    const freqId = parseInt(s, 10);
+    const f = frecuenciasCatalog.find(fc => fc.id === freqId);
+    const p = f?.peso ?? f?.id ?? freqId;
+    return Math.max(1, Math.min(5, Math.round(Number(p))));
+  }
+  const f = frecuenciasCatalog.find(fc => fc.label?.toLowerCase() === s.toLowerCase());
+  const p = f?.peso ?? f?.id ?? 3;
+  return Math.max(1, Math.min(5, Math.round(Number(p))));
 }
 
 /**
@@ -140,14 +195,11 @@ async function recalcularCausa(
   pesos: Record<string, number>,
   rangos: any[],
   tablaMitigacion: Record<string, number>,
-  rangosNivelRiesgo: any[]
+  rangosNivelRiesgo: any[],
+  porcentajeDimensionCruzada: number = 0.34,
+  frecuenciasCatalog: FrecuenciaCatalogItem[] = []
 ): Promise<any> {
   const gestion = causa.gestion || {};
-  
-  // Si no tiene datos de gestión, saltar
-  if (!gestion.puntajeAplicabilidad && !gestion.aplicabilidad) {
-    return null;
-  }
 
   // 1. Recalcular puntaje total
   const puntajes = {
@@ -163,43 +215,58 @@ async function recalcularCausa(
   // 2. Recalcular evaluación preliminar
   const evaluacionPreliminar = determinarEvaluacionPreliminar(puntajeTotal, rangos);
 
-  // 3. Recalcular evaluación definitiva
-  const desviaciones = gestion.desviaciones || 'A';
+  // 3. Recalcular evaluación definitiva (desviaciones puede venir como desviaciones o controlDesviaciones desde el front)
+  const desviaciones = gestion.desviaciones ?? gestion.controlDesviaciones ?? 'A';
   const evaluacionDefinitiva = determinarEvaluacionDefinitiva(evaluacionPreliminar, desviaciones);
 
   // 4. Obtener porcentaje de mitigación
   const porcentajeMitigacion = tablaMitigacion[evaluacionDefinitiva] || 0;
 
-  // 5. Obtener valores inherentes del riesgo
-  const riesgo = await prisma.riesgo.findUnique({
-    where: { id: causa.riesgoId },
-    include: { evaluacion: true }
-  });
-
+  // 5. Valores inherentes del riesgo (usar causa.riesgo si ya viene incluido, sino 1 query)
+  let riesgo = causa.riesgo;
+  if (!riesgo?.evaluacion) {
+    riesgo = await prisma.riesgo.findUnique({
+      where: { id: causa.riesgoId },
+      include: { evaluacion: true }
+    });
+  }
   if (!riesgo || !riesgo.evaluacion) {
     return null;
   }
 
-  const frecuenciaInherente = riesgo.evaluacion.probabilidad || 1;
-  const impactoInherente = riesgo.evaluacion.impactoMaximo || 1;
+  // Frecuencia inherente: por causa desde catálogo (igual que en inherente). Si la causa no tiene frecuencia, usar probabilidad del riesgo.
+  const frecuenciaPorCausa = resolverFrecuenciaCausaA1_5(causa.frecuencia, frecuenciasCatalog);
+  const frecuenciaInherente = frecuenciaPorCausa ?? riesgo.evaluacion.probabilidad ?? 1;
+  // Usar impactoGlobal (1-5) como impacto inherente: es el que actualiza recalcularRiesgoInherenteDesdeCausas.
+  // impactoMaximo a menudo no se actualiza y puede quedar en 1, lo que hacía que todo el impacto residual saliera 1.
+  const impactoEval = riesgo.evaluacion.impactoGlobal != null ? Number(riesgo.evaluacion.impactoGlobal) : riesgo.evaluacion.impactoMaximo;
+  const impactoInherente = Math.max(1, Math.min(5, Math.round(impactoEval) || 1));
   const tipoMitigacion = gestion.tipoMitigacion || 'AMBAS';
 
-  // 6. Calcular valores residuales
+  // 6. Calcular valores residuales (BY, BZ); dimensión cruzada usa porcentaje desde admin
   const frecuenciaResidual = calcularFrecuenciaResidual(
     frecuenciaInherente,
     porcentajeMitigacion,
-    tipoMitigacion
+    tipoMitigacion,
+    evaluacionDefinitiva,
+    porcentajeDimensionCruzada
   );
 
   const impactoResidual = calcularImpactoResidual(
     impactoInherente,
     porcentajeMitigacion,
-    tipoMitigacion
+    tipoMitigacion,
+    evaluacionDefinitiva,
+    porcentajeDimensionCruzada
   );
 
-  const calificacionResidual = frecuenciaResidual * impactoResidual;
+  // Calificación residual: excepción 2×2 = 3.99 (según matriz de riesgos)
+  let calificacionResidual = frecuenciaResidual * impactoResidual;
+  if (frecuenciaResidual === 2 && impactoResidual === 2) {
+    calificacionResidual = 3.99;
+  }
 
-  // 7. Determinar nivel de riesgo residual usando rangos configurables
+  // 7. Determinar nivel de riesgo residual usando rangos configurables (admin)
   const nivelRiesgoResidual = determinarNivelRiesgoResidual(calificacionResidual, rangosNivelRiesgo);
 
   // 8. Actualizar objeto gestion
@@ -230,6 +297,23 @@ async function recalcularCausa(
 }
 
 /**
+ * Recálculo en base de datos: invoca el procedimiento almacenado recalcular_residuales_completo().
+ * Libera el proceso Node (todo el trabajo lo hace la BD).
+ * Requiere que la migración 20250224120000_recalcular_residual_en_bd esté aplicada.
+ */
+export async function recalcularResidualesEnBD(): Promise<{ causasActualizadas: number; riesgosActualizados: number }> {
+  console.log(`${LOG_PREFIX} Ejecutando recálculo en BD (procedimiento recalcular_residuales_completo)...`);
+  const rows = await prisma.$queryRawUnsafe<Array<{ causas_actualizadas: bigint; riesgos_actualizados: bigint }>>(
+    'SELECT * FROM recalcular_residuales_completo()'
+  );
+  const row = rows?.[0];
+  const causas = row ? Number(row.causas_actualizadas) : 0;
+  const riesgos = row ? Number(row.riesgos_actualizados) : 0;
+  console.log(`${LOG_PREFIX} BD listo: ${causas} causas actualizadas, ${riesgos} riesgos actualizados (mapa residual usa probabilidadResidual/impactoResidual de EvaluacionRiesgo).`);
+  return { causasActualizadas: causas, riesgosActualizados: riesgos };
+}
+
+/**
  * Recalcula todos los riesgos residuales
  * 
  * @param preview - Si es true, solo simula sin guardar cambios
@@ -251,8 +335,17 @@ export async function recalcularTodosLosRiesgosResiduales(
     const rangos = await getRangosEvaluacion();
     const tablaMitigacion = await getTablaMitigacion();
     const rangosNivelRiesgo = await getRangosNivelRiesgo();
+    console.log(`${LOG_PREFIX} Inicio recálculo (config id=${config.id}). Preview=${preview}`);
 
-    // 2. Obtener todas las causas con controles
+    // 2. Parámetros de config (todo desde admin)
+    const porcentajeDimensionCruzada = await getPorcentajeDimensionCruzada();
+
+    // Catálogo de frecuencias para usar la frecuencia de cada causa en BY (calificación residual de la frecuencia)
+    const frecuenciasCatalog = await prisma.frecuenciaCatalog.findMany().then(rows =>
+      rows.map(r => ({ id: r.id, label: r.label, peso: r.peso }))
+    );
+
+    // 3. Obtener todas las causas con controles
     const causas = await prisma.causaRiesgo.findMany({
       where: {
         tipoGestion: { in: ['CONTROL', 'AMBOS'] },
@@ -264,44 +357,71 @@ export async function recalcularTodosLosRiesgosResiduales(
         }
       }
     });
+    console.log(`${LOG_PREFIX} Causas con CONTROL/AMBOS a procesar: ${causas.length}`);
 
-    // 3. Recalcular cada causa
+    // 3. Recalcular cada causa (solo fórmulas en memoria; causa.riesgo ya viene incluido, sin queries extra)
     const riesgosAfectados = new Set<number>();
+    const actualizaciones: { causaId: number; gestion: any }[] = [];
 
     for (const causa of causas) {
       try {
-        const recalculo = await recalcularCausa(causa, pesos, rangos, tablaMitigacion, rangosNivelRiesgo);
-        
+        const recalculo = await recalcularCausa(causa, pesos, rangos, tablaMitigacion, rangosNivelRiesgo, porcentajeDimensionCruzada, frecuenciasCatalog);
         if (recalculo) {
           resultado.detalles.push(recalculo);
           riesgosAfectados.add(recalculo.riesgoId);
-
-          // Si no es preview, guardar cambios
+          const g = recalculo.gestionActualizada;
+          const camb = recalculo.cambios;
+          const cambió = camb && (
+            camb.puntajeTotal?.anterior !== camb.puntajeTotal?.nuevo ||
+            camb.calificacionResidual?.anterior !== camb.calificacionResidual?.nuevo
+          );
+          console.log(
+            `${LOG_PREFIX} Causa ${recalculo.causaId} (riesgo ${recalculo.riesgoId}): Frecuencia residual=${g.frecuenciaResidual} Impacto residual=${g.impactoResidual} Calificación de la causa residual=${g.calificacionResidual} nivel=${g.nivelRiesgoResidual}` +
+            (cambió ? ` | cambió: Calificación de la causa residual ${camb?.calificacionResidual?.anterior}→${camb?.calificacionResidual?.nuevo}` : '')
+          );
           if (!preview) {
-            await prisma.causaRiesgo.update({
-              where: { id: recalculo.causaId },
-              data: { gestion: recalculo.gestionActualizada }
-            });
-            resultado.causasActualizadas++;
+            actualizaciones.push({ causaId: recalculo.causaId, gestion: recalculo.gestionActualizada });
           }
         }
       } catch (error: any) {
         resultado.errores.push(`Error en causa ${causa.id}: ${error.message}`);
+        console.warn(`${LOG_PREFIX} Error causa ${causa.id}:`, error?.message);
+      }
+    }
+
+    // 4. Guardar causas en lotes (mucho más rápido que 247 updates secuenciales)
+    if (!preview && actualizaciones.length > 0) {
+      const TAMANO_LOTE = 50;
+      for (let i = 0; i < actualizaciones.length; i += TAMANO_LOTE) {
+        const lote = actualizaciones.slice(i, i + TAMANO_LOTE);
+        await Promise.all(
+          lote.map(({ causaId, gestion }) =>
+            prisma.causaRiesgo.update({
+              where: { id: causaId },
+              data: { gestion }
+            })
+          )
+        );
+        resultado.causasActualizadas += lote.length;
       }
     }
 
     resultado.riesgosActualizados = riesgosAfectados.size;
 
-    // 4. Actualizar tabla EvaluacionRiesgo (si no es preview)
+    // 5. Actualizar EvaluacionRiesgo de TODOS los riesgos (mapa residual completo)
     if (!preview) {
-      for (const riesgoId of riesgosAfectados) {
-        try {
-          await actualizarEvaluacionRiesgo(riesgoId);
-        } catch (error: any) {
-          resultado.errores.push(`Error actualizando evaluación de riesgo ${riesgoId}: ${error.message}`);
-        }
+      const todasEval = await prisma.evaluacionRiesgo.findMany({ select: { riesgoId: true } });
+      const todosRiesgoIds = [...new Set(todasEval.map((e) => e.riesgoId))];
+      console.log(`${LOG_PREFIX} Actualizando EvaluacionRiesgo (mapa residual completo) para ${todosRiesgoIds.length} riesgos...`);
+      const LOTE_EVAL = 25;
+      for (let i = 0; i < todosRiesgoIds.length; i += LOTE_EVAL) {
+        const loteIds = todosRiesgoIds.slice(i, i + LOTE_EVAL);
+        await Promise.all(loteIds.map((riesgoId) => actualizarEvaluacionRiesgo(riesgoId, i < LOTE_EVAL)));
       }
+      resultado.riesgosActualizados = todosRiesgoIds.length;
     }
+
+    console.log(`${LOG_PREFIX} Fin: ${resultado.causasActualizadas} causas actualizadas, ${resultado.riesgosActualizados} riesgos con mapa residual actualizado.`);
 
   } catch (error: any) {
     resultado.errores.push(`Error general: ${error.message}`);
@@ -311,10 +431,23 @@ export async function recalcularTodosLosRiesgosResiduales(
 }
 
 /**
- * Actualiza la tabla EvaluacionRiesgo con los valores residuales
+ * Actualiza la tabla EvaluacionRiesgo con los valores residuales.
+ * Solo cuentan causas con CONTROL o AMBOS; las que solo tienen PLAN no cambian la calificación residual.
+ * Estos campos son los que usa el mapa de riesgos residual (posición por probabilidadResidual, impactoResidual).
+ * @param logReubicacion - si true, escribe en consola el antes/después para ver la reubicación en el mapa
  */
-async function actualizarEvaluacionRiesgo(riesgoId: number) {
-  // Obtener todas las causas del riesgo con controles
+async function actualizarEvaluacionRiesgo(riesgoId: number, logReubicacion: boolean = false) {
+  const evaluacion = await prisma.evaluacionRiesgo.findFirst({
+    where: { riesgoId }
+  });
+  if (!evaluacion) return;
+
+  const anteriores = {
+    prob: evaluacion.probabilidadResidual ?? null,
+    impacto: evaluacion.impactoResidual ?? null,
+    nivel: evaluacion.nivelRiesgoResidual ?? null
+  };
+
   const causas = await prisma.causaRiesgo.findMany({
     where: {
       riesgoId,
@@ -323,36 +456,102 @@ async function actualizarEvaluacionRiesgo(riesgoId: number) {
     }
   });
 
+  let probabilidadResidual: number;
+  let impactoResidual: number;
+  let riesgoResidual: number;
+  let nivelRiesgoResidual: string;
+
   if (causas.length === 0) {
-    return;
+    // Sin controles: residual = inherente (el mapa residual mostrará la misma posición que el inherente)
+    probabilidadResidual = evaluacion.probabilidad != null ? evaluacion.probabilidad : 1;
+    impactoResidual = evaluacion.impactoGlobal != null ? evaluacion.impactoGlobal : 1;
+    riesgoResidual = evaluacion.riesgoInherente != null ? evaluacion.riesgoInherente : 1;
+    nivelRiesgoResidual = evaluacion.nivelRiesgo != null ? evaluacion.nivelRiesgo : 'NIVEL BAJO';
+  } else {
+    let maxCalificacionResidual = 0;
+    let maxFrecuenciaResidual = 0;
+    let maxImpactoResidual = 0;
+    let nivelRiesgoResidualMax = 'NIVEL BAJO';
+
+    for (const causa of causas) {
+      const gestion = causa.gestion as any;
+      if (gestion && gestion.calificacionResidual != null) {
+        if (gestion.calificacionResidual > maxCalificacionResidual) {
+          maxCalificacionResidual = gestion.calificacionResidual;
+          maxFrecuenciaResidual = gestion.frecuenciaResidual != null ? gestion.frecuenciaResidual : 0;
+          maxImpactoResidual = gestion.impactoResidual != null ? gestion.impactoResidual : 0;
+          nivelRiesgoResidualMax = gestion.nivelRiesgoResidual != null ? gestion.nivelRiesgoResidual : 'NIVEL BAJO';
+        }
+      }
+    }
+
+    probabilidadResidual = maxFrecuenciaResidual || (evaluacion.probabilidad != null ? evaluacion.probabilidad : 1);
+    impactoResidual = maxImpactoResidual || (evaluacion.impactoGlobal != null ? evaluacion.impactoGlobal : 1);
+    riesgoResidual = maxCalificacionResidual || (evaluacion.riesgoInherente != null ? evaluacion.riesgoInherente : 1);
+    nivelRiesgoResidual = nivelRiesgoResidualMax;
   }
 
-  // Obtener el máximo valor residual de todas las causas
-  let maxCalificacionResidual = 0;
-  let maxFrecuenciaResidual = 0;
-  let maxImpactoResidual = 0;
-  let nivelRiesgoResidual = 'NIVEL BAJO';
+  const nuevosProb = Math.round(probabilidadResidual);
+  const nuevosImpacto = Math.round(impactoResidual);
 
-  for (const causa of causas) {
-    const gestion = causa.gestion as any;
-    if (gestion && gestion.calificacionResidual) {
-      if (gestion.calificacionResidual > maxCalificacionResidual) {
-        maxCalificacionResidual = gestion.calificacionResidual;
-        maxFrecuenciaResidual = gestion.frecuenciaResidual || 0;
-        maxImpactoResidual = gestion.impactoResidual || 0;
-        nivelRiesgoResidual = gestion.nivelRiesgoResidual || 'NIVEL BAJO';
+  await prisma.evaluacionRiesgo.updateMany({
+    where: { riesgoId },
+    data: {
+      probabilidadResidual: nuevosProb,
+      impactoResidual: nuevosImpacto,
+      riesgoResidual: Math.round(riesgoResidual),
+      nivelRiesgoResidual
+    }
+  });
+
+  if (logReubicacion && (anteriores.prob !== nuevosProb || anteriores.impacto !== nuevosImpacto || anteriores.nivel !== nivelRiesgoResidual)) {
+    console.log(
+      `${LOG_PREFIX} Calificación del riesgo residual (mapa): riesgo ${riesgoId} (probabilidadResidual,impactoResidual,nivelRiesgoResidual) ${anteriores.prob ?? '-'},${anteriores.impacto ?? '-'},${anteriores.nivel ?? '-'} → ${nuevosProb},${nuevosImpacto},${nivelRiesgoResidual}`
+    );
+  }
+}
+
+/**
+ * Recalcula el riesgo residual solo para un riesgo (solo causas con CONTROL o AMBOS; PLAN no afecta).
+ * Usa la configuración activa del admin (pesos, rangos, tabla mitigación, rangos nivel).
+ * Se debe llamar al guardar, editar o eliminar un control de una causa de este riesgo.
+ * Siempre actualiza EvaluacionRiesgo: si no queda ninguna causa con control, residual = inherente.
+ */
+export async function recalcularResidualPorRiesgo(riesgoId: number): Promise<void> {
+  const config = await getConfiguracionActiva().catch(() => null);
+
+  if (config) {
+    const pesos = await getPesosCriterios();
+    const rangos = await getRangosEvaluacion();
+    const tablaMitigacion = await getTablaMitigacion();
+    const rangosNivelRiesgo = await getRangosNivelRiesgo();
+    const porcentajeDimensionCruzada = await getPorcentajeDimensionCruzada();
+    const frecuenciasCatalog = await prisma.frecuenciaCatalog.findMany().then(rows =>
+      rows.map(r => ({ id: r.id, label: r.label, peso: r.peso }))
+    );
+
+    const causas = await prisma.causaRiesgo.findMany({
+      where: {
+        riesgoId,
+        tipoGestion: { in: ['CONTROL', 'AMBOS'] },
+        gestion: { not: null }
+      },
+      include: {
+        riesgo: { include: { evaluacion: true } }
+      }
+    });
+
+    for (const causa of causas) {
+      const recalculo = await recalcularCausa(causa, pesos, rangos, tablaMitigacion, rangosNivelRiesgo, porcentajeDimensionCruzada, frecuenciasCatalog);
+      if (recalculo) {
+        await prisma.causaRiesgo.update({
+          where: { id: recalculo.causaId },
+          data: { gestion: recalculo.gestionActualizada }
+        });
       }
     }
   }
 
-  // Actualizar EvaluacionRiesgo
-  await prisma.evaluacionRiesgo.updateMany({
-    where: { riesgoId },
-    data: {
-      probabilidadResidual: maxFrecuenciaResidual,
-      impactoResidual: maxImpactoResidual,
-      riesgoResidual: maxCalificacionResidual,
-      nivelRiesgoResidual
-    }
-  });
+  // Siempre actualizar evaluación: si no hay causas con control, residual = inherente
+  await actualizarEvaluacionRiesgo(riesgoId);
 }

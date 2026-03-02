@@ -8,7 +8,7 @@ import {
     getPesosImpacto, updatePesosImpacto,
     updateFrecuencias, updateFuentes, updateOrigenes, updateConsecuencias,
     createImpactoTipo, updateImpactoNiveles, deleteImpactoTipo,
-    createSubtipo, updateSubtipo, deleteSubtipo
+    getSubtipos, createSubtipo, updateSubtipo, deleteSubtipo
 } from '../controllers/catalogos.controller';
 
 const router = Router();
@@ -18,6 +18,7 @@ router.get('/tipologias', getTipologias);
 router.post('/tipologias', createTipologia);
 router.put('/tipologias/:id', updateTipologia);
 router.delete('/tipologias/:id', deleteTipologia);
+router.get('/subtipos', getSubtipos);
 router.post('/subtipos', createSubtipo);
 router.put('/subtipos/:id', updateSubtipo);
 router.delete('/subtipos/:id', deleteSubtipo);
