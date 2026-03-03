@@ -44,6 +44,10 @@ export const createUsuario = async (req: Request, res: Response) => {
         if (!nombre || !email) {
             return res.status(400).json({ error: 'nombre and email are required' });
         }
+        const emailStr = String(email).trim();
+        if (!/^[^\s@]+@[^\s@]+(\.[^\s@]+)+$/.test(emailStr)) {
+            return res.status(400).json({ error: 'El correo no tiene un formato válido. Se aceptan dominios como .com, .co, .ce, .cl, .com.co, etc.' });
+        }
         
         // Obtener el código del rol para el campo role (string)
         const roleData = await prisma.role.findUnique({
@@ -71,11 +75,11 @@ export const createUsuario = async (req: Request, res: Response) => {
 
         await prisma.$executeRaw`
             INSERT INTO "Usuario" (nombre, email, password, role, "roleId", "cargoId", activo, "createdAt", "updatedAt")
-            VALUES (${nombre}, ${email}, ${plainPassword}, ${roleCodigo}, ${Number(roleId)}, ${cargoId ? Number(cargoId) : null}, ${activo ?? true}, NOW(), NOW())
+            VALUES (${nombre}, ${emailStr}, ${plainPassword}, ${roleCodigo}, ${Number(roleId)}, ${cargoId ? Number(cargoId) : null}, ${activo ?? true}, NOW(), NOW())
         `;
 
         const user = await prisma.usuario.findFirst({
-            where: { email },
+            where: { email: emailStr },
             include: { 
                 cargo: true,
                 role: true
@@ -98,7 +102,13 @@ export const updateUsuario = async (req: Request, res: Response) => {
         const updateData: any = {};
         
         if (nombre !== undefined) updateData.nombre = nombre;
-        if (email !== undefined) updateData.email = email;
+        if (email !== undefined) {
+            const emailStr = String(email).trim();
+            if (!/^[^\s@]+@[^\s@]+(\.[^\s@]+)+$/.test(emailStr)) {
+                return res.status(400).json({ error: 'El correo no tiene un formato válido. Se aceptan dominios como .com, .co, .ce, .cl, .com.co, etc.' });
+            }
+            updateData.email = emailStr;
+        }
         if (password !== undefined) updateData.password = password;
         if (roleId !== undefined) updateData.roleId = Number(roleId);
         if (cargoId !== undefined) updateData.cargoId = cargoId ? Number(cargoId) : null;

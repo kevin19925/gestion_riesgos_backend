@@ -12,6 +12,7 @@ model Role {
   codigo      String    @unique @db.VarChar(255)
   nombre      String    @db.VarChar(255)
   descripcion String?
+  ambito      String    @default("OPERATIVO") @db.VarChar(20) // SISTEMA = admin/config; OPERATIVO = riesgos, controles, planes
   permisos    Json?
   activo      Boolean?  @default(true)
   createdAt   DateTime? @default(now()) @db.Timestamp(6)

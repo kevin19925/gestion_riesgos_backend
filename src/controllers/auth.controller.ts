@@ -4,19 +4,27 @@ import { signToken } from '../utils/jwt';
 import { deleteBlobByUrl, isAzureBlobConfigured } from '../utils/azureBlob';
 
 export const login = async (req: Request, res: Response) => {
-    const { username, password } = req.body;
+    const { username, password } = req.body as { username?: string; password?: string };
     if (!username || !password) {
         return res.status(400).json({ success: false, error: 'Usuario y contraseña requeridos' });
     }
 
     try {
+        const normalizedUsername = String(username).trim();
+        const normalizedPassword = String(password).trim();
+
+        console.log('[auth/login] intento de login', {
+            username: normalizedUsername,
+            // Nunca loguear la contraseña
+        });
+
         const user = await prisma.usuario.findFirst({
             where: {
                 OR: [
-                    { email: username },
-                    { email: `${username}@comware.com.co` }
+                    { email: normalizedUsername },
+                    { email: `${normalizedUsername}@comware.com.co` }
                 ],
-                password: password
+                password: normalizedPassword
             },
             select: {
                 id: true,
@@ -26,20 +34,41 @@ export const login = async (req: Request, res: Response) => {
                 roleId: true,
                 cargoId: true,
                 fotoPerfil: true,
-                role: { select: { codigo: true } },
+                role: { select: { codigo: true, ambito: true, permisos: true } },
                 cargo: { select: { nombre: true } }
             }
         });
 
         if (!user) {
+            console.warn('[auth/login] usuario no encontrado o contraseña incorrecta', {
+                username: normalizedUsername,
+            });
             return res.status(401).json({ success: false, error: 'Usuario o contraseña incorrectos' });
         }
 
         if (!user.activo) {
+            console.warn('[auth/login] usuario inactivo', {
+                userId: user.id,
+                email: user.email,
+            });
             return res.status(401).json({ success: false, error: 'Usuario inactivo' });
         }
 
         const roleCodigo = user.role?.codigo || 'usuario';
+        const roleAmbito = (user.role as { ambito?: string })?.ambito || 'OPERATIVO';
+        const permisos = (user.role as { permisos?: { visualizar?: boolean; editar?: boolean } })?.permisos || {};
+        const puedeVisualizar = permisos.visualizar !== false;
+        const puedeEditar = permisos.editar === true;
+
+        console.log('[auth/login] login exitoso', {
+            userId: user.id,
+            email: user.email,
+            roleCodigo,
+            roleAmbito,
+            puedeVisualizar,
+            puedeEditar,
+        });
+
         const token = signToken({
             userId: user.id,
             email: user.email,
@@ -59,7 +88,10 @@ export const login = async (req: Request, res: Response) => {
                 department: user.cargo?.nombre || 'General',
                 position: user.cargo?.nombre || roleCodigo,
                 esDuenoProcesos: roleCodigo === 'dueño_procesos',
-                fotoPerfil: (user as { fotoPerfil?: string | null }).fotoPerfil ?? null
+                fotoPerfil: (user as { fotoPerfil?: string | null }).fotoPerfil ?? null,
+                ambito: roleAmbito,
+                puedeVisualizar,
+                puedeEditar
             }
         });
     } catch (error: any) {
@@ -83,7 +115,7 @@ export const getMe = async (req: Request, res: Response) => {
                 roleId: true,
                 cargoId: true,
                 fotoPerfil: true,
-                role: { select: { codigo: true } },
+                role: { select: { codigo: true, ambito: true, permisos: true } },
                 cargo: { select: { nombre: true } }
             }
         });
@@ -91,6 +123,11 @@ export const getMe = async (req: Request, res: Response) => {
         if (!user.activo) return res.status(403).json({ error: 'User inactive' });
 
         const roleCodigo = user.role?.codigo || 'usuario';
+        const roleAmbito = (user.role as { ambito?: string })?.ambito || 'OPERATIVO';
+        const permisos = (user.role as { permisos?: { visualizar?: boolean; editar?: boolean } })?.permisos || {};
+        const puedeVisualizar = permisos.visualizar !== false;
+        const puedeEditar = permisos.editar === true;
+
         res.json({
             id: user.id,
             username: user.email.split('@')[0],
@@ -100,7 +137,10 @@ export const getMe = async (req: Request, res: Response) => {
             department: user.cargo?.nombre || 'General',
             position: user.cargo?.nombre || roleCodigo,
             esDuenoProcesos: roleCodigo === 'dueño_procesos',
-            fotoPerfil: (user as { fotoPerfil?: string | null }).fotoPerfil ?? null
+            fotoPerfil: (user as { fotoPerfil?: string | null }).fotoPerfil ?? null,
+            ambito: roleAmbito,
+            puedeVisualizar,
+            puedeEditar
         });
     } catch (error: any) {
         console.error('[auth/getMe]', error?.message || error);
@@ -161,6 +201,11 @@ export const updateMe = async (req: Request, res: Response) => {
         });
 
         const roleCodigo = updated.role?.codigo || 'usuario';
+        const roleAmbito = (updated.role as { ambito?: string })?.ambito || 'OPERATIVO';
+        const permisos = (updated.role as { permisos?: { visualizar?: boolean; editar?: boolean } })?.permisos || {};
+        const puedeVisualizar = permisos.visualizar !== false;
+        const puedeEditar = permisos.editar === true;
+
         res.json({
             id: updated.id,
             username: updated.email.split('@')[0],
@@ -170,7 +215,10 @@ export const updateMe = async (req: Request, res: Response) => {
             department: updated.cargo?.nombre || 'General',
             position: updated.cargo?.nombre || roleCodigo,
             esDuenoProcesos: roleCodigo === 'dueño_procesos',
-            fotoPerfil: (updated as any).fotoPerfil ?? null
+            fotoPerfil: (updated as any).fotoPerfil ?? null,
+            ambito: roleAmbito,
+            puedeVisualizar,
+            puedeEditar
         });
     } catch (error: any) {
         console.error('[auth/updateMe]', error?.message || error);
