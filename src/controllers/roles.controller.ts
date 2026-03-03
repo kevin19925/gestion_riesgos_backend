@@ -1,6 +1,9 @@
 import { Request, Response } from 'express';
 import prisma from '../prisma';
 
+/** Códigos de roles del sistema que no se pueden eliminar ni cambiar de código */
+const ROLES_PROTEGIDOS = ['admin', 'dueño_procesos', 'gerente', 'supervisor'];
+
 export const getRoles = async (req: Request, res: Response) => {
     try {
         const roles = await prisma.role.findMany({
@@ -27,17 +30,19 @@ export const getRoleById = async (req: Request, res: Response) => {
 };
 
 export const createRole = async (req: Request, res: Response) => {
-    const { codigo, nombre, descripcion, permisos, activo } = req.body;
+    const { codigo, nombre, descripcion, ambito, permisos, activo } = req.body;
     try {
         if (!codigo || !nombre) {
             return res.status(400).json({ error: 'codigo and nombre are required' });
         }
+        const ambitoValido = ambito === 'SISTEMA' || ambito === 'OPERATIVO' ? ambito : 'OPERATIVO';
 
         const nuevoRole = await prisma.role.create({
             data: {
                 codigo: String(codigo).toLowerCase(),
                 nombre,
                 descripcion: descripcion || null,
+                ambito: ambitoValido,
                 permisos: permisos || null,
                 activo: activo !== undefined ? Boolean(activo) : true
             }
@@ -53,12 +58,13 @@ export const createRole = async (req: Request, res: Response) => {
 
 export const updateRole = async (req: Request, res: Response) => {
     const id = Number(req.params.id);
-    const { codigo, nombre, descripcion, permisos, activo } = req.body;
+    const { nombre, descripcion, ambito, permisos, activo } = req.body;
     try {
+        // El código no se puede editar (solo se define al crear el rol)
         const updateData: any = {};
-        if (codigo !== undefined) updateData.codigo = String(codigo).toLowerCase();
         if (nombre !== undefined) updateData.nombre = nombre;
         if (descripcion !== undefined) updateData.descripcion = descripcion;
+        if (ambito !== undefined) updateData.ambito = ambito === 'SISTEMA' || ambito === 'OPERATIVO' ? ambito : 'OPERATIVO';
         if (permisos !== undefined) updateData.permisos = permisos;
         if (activo !== undefined) updateData.activo = Boolean(activo);
 
@@ -78,7 +84,15 @@ export const updateRole = async (req: Request, res: Response) => {
 export const deleteRole = async (req: Request, res: Response) => {
     const id = Number(req.params.id);
     try {
-        // Verificar si hay usuarios usando este rol
+        const role = await prisma.role.findUnique({ where: { id } });
+        if (!role) return res.status(404).json({ error: 'Rol no encontrado' });
+
+        if (ROLES_PROTEGIDOS.includes(role.codigo)) {
+            return res.status(400).json({
+                error: 'No se puede eliminar un rol del sistema (admin, dueño_procesos, gerente, supervisor).'
+            });
+        }
+
         const usuariosConRol = await prisma.usuario.count({
             where: { roleId: id }
         });

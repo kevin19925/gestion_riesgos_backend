@@ -201,6 +201,18 @@ async function recalcularCausa(
 ): Promise<any> {
   const gestion = causa.gestion || {};
 
+  // Si la gestión ya trae valores residuales completos desde el frontend,
+  // no recalcularlos de nuevo. Esto evita desalinear lo que ve el usuario
+  // en el panel azul con lo que finalmente se guarda.
+  if (
+    gestion.frecuenciaResidual != null &&
+    gestion.impactoResidual != null &&
+    gestion.calificacionResidual != null &&
+    gestion.nivelRiesgoResidual != null
+  ) {
+    return null;
+  }
+
   // 1. Recalcular puntaje total
   const puntajes = {
     aplicabilidad: gestion.puntajeAplicabilidad || 0,
