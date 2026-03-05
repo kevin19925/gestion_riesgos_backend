@@ -4,6 +4,7 @@ import helmet from 'helmet';
 import morgan from 'morgan';
 import compression from 'compression';
 import { authMiddleware } from './middleware/auth';
+import { auditMiddleware } from './middleware/audit.middleware';
 import routes from './routes';
 
 const app = express();
@@ -78,6 +79,9 @@ app.use(morgan(process.env.NODE_ENV === 'production' ? 'combined' : 'dev'));
 
 // JWT obligatorio en todas las rutas /api salvo health y POST auth/login
 app.use(authMiddleware({ required: true, publicPaths: ['/api/health', '/api/auth/login'] }));
+
+// Middleware de auditoría (captura automática de cambios)
+app.use(auditMiddleware());
 
 // Main Router
 app.use('/api', routes);
