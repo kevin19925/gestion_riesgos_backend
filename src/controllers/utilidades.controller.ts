@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import prisma from '../prisma';
+import { obtenerHistorial } from '../services/audit.service';
 
 // ============================================
 // OBSERVACIONES
@@ -38,7 +39,25 @@ export const createObservacion = async (req: Request, res: Response) => {
 // ============================================
 // HISTORIAL
 // ============================================
-export const getHistorial = async (_req: Request, res: Response) => {
-    res.json([]);
+export const getHistorial = async (req: Request, res: Response) => {
+    try {
+        const { usuarioId, tabla, accion, fechaDesde, fechaHasta, page, pageSize } = req.query;
+
+        const filtros: any = {};
+
+        if (usuarioId) filtros.usuarioId = parseInt(usuarioId as string);
+        if (tabla) filtros.tabla = tabla as string;
+        if (accion) filtros.accion = accion as string;
+        if (fechaDesde) filtros.fechaDesde = new Date(fechaDesde as string);
+        if (fechaHasta) filtros.fechaHasta = new Date(fechaHasta as string);
+        if (page) filtros.page = parseInt(page as string);
+        if (pageSize) filtros.pageSize = parseInt(pageSize as string);
+
+        const resultado = await obtenerHistorial(filtros);
+        res.json(resultado.data);
+    } catch (error) {
+        console.error('Error al obtener historial:', error);
+        res.status(500).json({ error: 'Error al obtener historial' });
+    }
 };
 
