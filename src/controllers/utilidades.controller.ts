@@ -5,13 +5,25 @@ import { obtenerHistorial } from '../services/audit.service';
 // ============================================
 // OBSERVACIONES
 // ============================================
+const OBSERVACIONES_LIMIT = 500;
+
 export const getObservaciones = async (req: Request, res: Response) => {
     const { procesoId } = req.query;
     try {
         const where = procesoId ? { procesoId: Number(procesoId) } : {};
         const observations = await prisma.observacion.findMany({
             where,
-            include: { autor: true },
+            take: OBSERVACIONES_LIMIT,
+            select: {
+                id: true,
+                procesoId: true,
+                texto: true,
+                tipo: true,
+                createdAt: true,
+                updatedAt: true,
+                autorId: true,
+                autor: { select: { id: true, nombre: true, email: true } }
+            },
             orderBy: { createdAt: 'desc' }
         });
         res.json(observations);

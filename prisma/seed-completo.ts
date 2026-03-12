@@ -20,7 +20,6 @@ async function main() {
     try {
         await prisma.eventoMaterializado.deleteMany({})
         await prisma.incidencia.deleteMany({})
-        await prisma.benchmarking.deleteMany({})
         await prisma.documento.deleteMany({})
         await prisma.planAccion.deleteMany({})
         await prisma.control.deleteMany({})
@@ -457,7 +456,7 @@ async function main() {
             zona: 'Operacional',
             tipologiaNivelI: '02 Operacional',
             tipologiaNivelII: 'Falta de actualización',
-            tipoRiesgoId: allTiposRiesgo.find(t => t.nombre === 'Operacional')?.id,
+            tipologiaTipo1Id: allTiposRiesgo.find(t => t.nombre === 'Operacional')?.id,
             causaRiesgo: 'Personas',
             fuenteCausa: 'Talleres internos',
             origen: 'Talleres internos',
@@ -474,7 +473,7 @@ async function main() {
             zona: 'Cumplimiento',
             tipologiaNivelI: '04 Cumplimiento',
             tipologiaNivelII: 'Cumplimiento regulatorio',
-            tipoRiesgoId: allTiposRiesgo.find(t => t.nombre === 'Cumplimiento')?.id,
+            tipologiaTipo1Id: allTiposRiesgo.find(t => t.nombre === 'Cumplimiento')?.id,
             causaRiesgo: 'Legal',
             fuenteCausa: 'Auditoría HHI',
             origen: 'Auditoría HHI',
@@ -491,7 +490,7 @@ async function main() {
             zona: 'Estratégico',
             tipologiaNivelI: '01 Estratégico',
             tipologiaNivelII: 'Retención de talento',
-            tipoRiesgoId: allTiposRiesgo.find(t => t.nombre === 'Estratégico')?.id,
+            tipologiaTipo1Id: allTiposRiesgo.find(t => t.nombre === 'Estratégico')?.id,
             causaRiesgo: 'Personas',
             fuenteCausa: 'Mercado laboral',
             origen: 'Mercado laboral',

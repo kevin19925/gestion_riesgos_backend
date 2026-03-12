@@ -1,7 +1,12 @@
 import { Request, Response } from 'express';
 import prisma from '../prisma';
+import { redisGet, redisSet, redisDel } from '../redisClient';
 import { recalcularRiesgoInherenteDesdeCausas } from './riesgos.controller';
 import { getDeleteErrorMessage } from '../utils/prismaErrors';
+
+const CACHE_TTL_CATALOGOS = 300; // 5 minutos
+const CACHE_KEY_TIPOLOGIAS = 'catalogos:tipologias';
+const CACHE_KEY_SUBTIPOS = 'catalogos:subtipos';
 
 export const getListasValores = async (req: Request, res: Response) => {
     // Return hardcoded or dynamic lists
@@ -26,9 +31,21 @@ export const getListasValores = async (req: Request, res: Response) => {
 
 export const getTipologias = async (req: Request, res: Response) => {
     try {
+        const cached = await redisGet<any>(CACHE_KEY_TIPOLOGIAS);
+        if (cached) {
+            res.setHeader('Cache-Control', 'public, max-age=300');
+            return res.json(cached);
+        }
         const tipologias = await prisma.tipoRiesgo.findMany({
-            include: { subtipos: { orderBy: { id: 'asc' } } }
+            select: {
+                id: true,
+                nombre: true,
+                descripcion: true,
+                subtipos: { select: { id: true, nombre: true, tipoRiesgoId: true }, orderBy: { id: 'asc' } }
+            }
         });
+        await redisSet(CACHE_KEY_TIPOLOGIAS, tipologias, CACHE_TTL_CATALOGOS);
+        res.setHeader('Cache-Control', 'public, max-age=300');
         res.json(tipologias);
     } catch (error: any) {
         console.error('[catalogos/getTipologias]', error?.message || error);
@@ -42,6 +59,8 @@ export const createTipologia = async (req: Request, res: Response) => {
         const newTipologia = await prisma.tipoRiesgo.create({
             data: { nombre: String(nombre).trim(), descripcion: descripcion != null ? String(descripcion).trim() || null : null }
         });
+        await redisDel(CACHE_KEY_TIPOLOGIAS);
+        await redisDel(CACHE_KEY_SUBTIPOS);
         res.status(201).json(newTipologia);
     } catch (error) {
         res.status(500).json({ error: 'Error creating tipologia' });
@@ -59,6 +78,8 @@ export const updateTipologia = async (req: Request, res: Response) => {
                 ...(descripcion !== undefined && { descripcion: descripcion != null ? String(descripcion).trim() || null : null })
             }
         });
+        await redisDel(CACHE_KEY_TIPOLOGIAS);
+        await redisDel(CACHE_KEY_SUBTIPOS);
         res.json(updated);
     } catch (error) {
         res.status(500).json({ error: 'Error updating tipologia' });
@@ -69,6 +90,8 @@ export const deleteTipologia = async (req: Request, res: Response) => {
     const id = Number(req.params.id);
     try {
         await prisma.tipoRiesgo.delete({ where: { id } });
+        await redisDel(CACHE_KEY_TIPOLOGIAS);
+        await redisDel(CACHE_KEY_SUBTIPOS);
         res.status(204).send();
     } catch (error) {
         const msg = getDeleteErrorMessage(error, 'tipología', 'subtipos o riesgos asociados');
@@ -79,9 +102,17 @@ export const deleteTipologia = async (req: Request, res: Response) => {
 
 export const getSubtipos = async (req: Request, res: Response) => {
     try {
+        const cached = await redisGet<any>(CACHE_KEY_SUBTIPOS);
+        if (cached) {
+            res.setHeader('Cache-Control', 'public, max-age=300');
+            return res.json(cached);
+        }
         const subtipos = await prisma.subtipoRiesgo.findMany({
+            select: { id: true, nombre: true, descripcion: true, tipoRiesgoId: true },
             orderBy: [{ tipoRiesgoId: 'asc' }, { id: 'asc' }]
         });
+        await redisSet(CACHE_KEY_SUBTIPOS, subtipos, CACHE_TTL_CATALOGOS);
+        res.setHeader('Cache-Control', 'public, max-age=300');
         res.json(subtipos);
     } catch (error: any) {
         console.error('[catalogos/getSubtipos]', error?.message || error);
@@ -103,6 +134,8 @@ export const createSubtipo = async (req: Request, res: Response) => {
                 descripcion: descripcion != null ? String(descripcion).trim() || null : null
             }
         });
+        await redisDel(CACHE_KEY_TIPOLOGIAS);
+        await redisDel(CACHE_KEY_SUBTIPOS);
         res.status(201).json(subtipo);
     } catch (error: any) {
         console.error('[catalogos/createSubtipo]', error?.message || error);
@@ -123,6 +156,8 @@ export const updateSubtipo = async (req: Request, res: Response) => {
                 ...(descripcion !== undefined && { descripcion: descripcion != null ? String(descripcion).trim() || null : null })
             }
         });
+        await redisDel(CACHE_KEY_TIPOLOGIAS);
+        await redisDel(CACHE_KEY_SUBTIPOS);
         res.json(updated);
     } catch (error: any) {
         console.error('[catalogos/updateSubtipo]', error?.message || error);
@@ -135,6 +170,8 @@ export const deleteSubtipo = async (req: Request, res: Response) => {
     const id = Number(req.params.id);
     try {
         await prisma.subtipoRiesgo.delete({ where: { id } });
+        await redisDel(CACHE_KEY_TIPOLOGIAS);
+        await redisDel(CACHE_KEY_SUBTIPOS);
         res.status(204).send();
     } catch (error) {
         const msg = getDeleteErrorMessage(error, 'subtipo', 'riesgos asociados');

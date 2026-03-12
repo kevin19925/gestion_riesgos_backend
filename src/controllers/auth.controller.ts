@@ -2,6 +2,9 @@ import { Request, Response } from 'express';
 import prisma from '../prisma';
 import { signToken } from '../utils/jwt';
 import { deleteBlobByUrl, isAzureBlobConfigured } from '../utils/azureBlob';
+import { redisGet, redisSet, redisDel } from '../redisClient';
+
+const CACHE_TTL_ME = 60; // 1 minuto para GET /auth/me
 
 export const login = async (req: Request, res: Response) => {
     const { username, password } = req.body as { username?: string; password?: string };
@@ -100,13 +103,43 @@ export const login = async (req: Request, res: Response) => {
     }
 };
 
+function buildMePayload(user: any): object {
+    const roleCodigo = user.role?.codigo || 'usuario';
+    const roleAmbito = (user.role as { ambito?: string })?.ambito || 'OPERATIVO';
+    const permisos = (user.role as { permisos?: { visualizar?: boolean; editar?: boolean } })?.permisos || {};
+    return {
+        id: user.id,
+        username: user.email.split('@')[0],
+        email: user.email,
+        fullName: user.nombre,
+        role: roleCodigo,
+        department: user.cargo?.nombre || 'General',
+        position: user.cargo?.nombre || roleCodigo,
+        esDuenoProcesos: roleCodigo === 'dueño_procesos',
+        fotoPerfil: (user as { fotoPerfil?: string | null }).fotoPerfil ?? null,
+        ambito: roleAmbito,
+        puedeVisualizar: permisos.visualizar !== false,
+        puedeEditar: permisos.editar === true
+    };
+}
+
 export const getMe = async (req: Request, res: Response) => {
     const id = (req as any).user?.userId ?? req.query.id;
     if (!id) return res.status(400).json({ error: 'User ID or token required' });
 
+    const userId = Number(id);
+    if (isNaN(userId)) return res.status(400).json({ error: 'Invalid user ID' });
+
     try {
+        const cacheKey = `auth:me:${userId}`;
+        const cached = await redisGet<any>(cacheKey);
+        if (cached) {
+            res.setHeader('Cache-Control', 'private, max-age=60');
+            return res.json(cached);
+        }
+
         const user = await prisma.usuario.findUnique({
-            where: { id: Number(id) },
+            where: { id: userId },
             select: {
                 id: true,
                 nombre: true,
@@ -122,26 +155,10 @@ export const getMe = async (req: Request, res: Response) => {
         if (!user) return res.status(404).json({ error: 'User not found' });
         if (!user.activo) return res.status(403).json({ error: 'User inactive' });
 
-        const roleCodigo = user.role?.codigo || 'usuario';
-        const roleAmbito = (user.role as { ambito?: string })?.ambito || 'OPERATIVO';
-        const permisos = (user.role as { permisos?: { visualizar?: boolean; editar?: boolean } })?.permisos || {};
-        const puedeVisualizar = permisos.visualizar !== false;
-        const puedeEditar = permisos.editar === true;
-
-        res.json({
-            id: user.id,
-            username: user.email.split('@')[0],
-            email: user.email,
-            fullName: user.nombre,
-            role: roleCodigo,
-            department: user.cargo?.nombre || 'General',
-            position: user.cargo?.nombre || roleCodigo,
-            esDuenoProcesos: roleCodigo === 'dueño_procesos',
-            fotoPerfil: (user as { fotoPerfil?: string | null }).fotoPerfil ?? null,
-            ambito: roleAmbito,
-            puedeVisualizar,
-            puedeEditar
-        });
+        const payload = buildMePayload(user);
+        await redisSet(cacheKey, payload, CACHE_TTL_ME);
+        res.setHeader('Cache-Control', 'private, max-age=60');
+        res.json(payload);
     } catch (error: any) {
         console.error('[auth/getMe]', error?.message || error);
         res.status(500).json({ error: 'No se pudo cargar el usuario. Intente de nuevo.' });
@@ -197,29 +214,19 @@ export const updateMe = async (req: Request, res: Response) => {
         const updated = await prisma.usuario.update({
             where: { id: Number(userId) },
             data: updateData,
-            include: { cargo: true, role: true }
+            select: {
+                id: true,
+                nombre: true,
+                email: true,
+                fotoPerfil: true,
+                cargo: { select: { nombre: true } },
+                role: { select: { codigo: true, ambito: true, permisos: true } }
+            }
         });
 
-        const roleCodigo = updated.role?.codigo || 'usuario';
-        const roleAmbito = (updated.role as { ambito?: string })?.ambito || 'OPERATIVO';
-        const permisos = (updated.role as { permisos?: { visualizar?: boolean; editar?: boolean } })?.permisos || {};
-        const puedeVisualizar = permisos.visualizar !== false;
-        const puedeEditar = permisos.editar === true;
+        await redisDel(`auth:me:${userId}`);
 
-        res.json({
-            id: updated.id,
-            username: updated.email.split('@')[0],
-            email: updated.email,
-            fullName: updated.nombre,
-            role: roleCodigo,
-            department: updated.cargo?.nombre || 'General',
-            position: updated.cargo?.nombre || roleCodigo,
-            esDuenoProcesos: roleCodigo === 'dueño_procesos',
-            fotoPerfil: (updated as any).fotoPerfil ?? null,
-            ambito: roleAmbito,
-            puedeVisualizar,
-            puedeEditar
-        });
+        res.json(buildMePayload(updated));
     } catch (error: any) {
         console.error('[auth/updateMe]', error?.message || error);
         const raw = error?.message || '';

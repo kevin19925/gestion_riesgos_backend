@@ -84,11 +84,15 @@ model Proceso {
   analisis        String?
   documentoUrl    String?
   documentoNombre String?
+  documentoCaracterizacionUrl    String?
+  documentoCaracterizacionNombre String?
+  documentoFlujoGramaUrl        String?
+  documentoFlujoGramaNombre     String?
   createdAt       DateTime              @default(now())
   updatedAt       DateTime              @updatedAt
   sigla           String?
-  benchmarking    Benchmarking[]
   contextos       Contexto[]
+  contextoItems   ContextoItem[]
   documentos      Documento[]
   dofaItems       DofaItem[]
   incidencias     Incidencia[]
@@ -124,6 +128,8 @@ model DofaItem {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
   proceso     Proceso  @relation(fields: [procesoId], references: [id], onDelete: Cascade)
+
+  @@index([procesoId])
 }
 
 model Normatividad {
@@ -143,6 +149,8 @@ model Normatividad {
   createdAt             DateTime @default(now())
   updatedAt             DateTime @updatedAt
   proceso               Proceso  @relation(fields: [procesoId], references: [id], onDelete: Cascade)
+
+  @@index([procesoId])
 }
 
 model Contexto {
@@ -153,6 +161,23 @@ model Contexto {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
   proceso     Proceso  @relation(fields: [procesoId], references: [id], onDelete: Cascade)
+
+  @@index([procesoId])
+}
+
+model ContextoItem {
+  id             Int      @id @default(autoincrement())
+  procesoId      Int
+  tipo           String   // ej. INTERNO_FINANCIEROS, EXTERNO_ECONOMICO
+  signo          String   // POSITIVO | NEGATIVO
+  descripcion    String
+  enviarADofa    Boolean? @default(false)  // si este ítem se envía a la matriz DOFA
+  dofaDimension  String?  // FORTALEZA | OPORTUNIDAD | DEBILIDAD | AMENAZA
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  proceso        Proceso  @relation(fields: [procesoId], references: [id], onDelete: Cascade)
+
+  @@index([procesoId])
 }
 
 model Riesgo {
@@ -162,9 +187,11 @@ model Riesgo {
   descripcion                 String
   clasificacion               String?
   numeroIdentificacion        String?
-  tipoRiesgoId                Int?
-  subtipoRiesgoId             Int?
+  tipologiaTipo1Id            Int?                  // Tipología tipo I (antes Tipo de Riesgo)
+  tipologiaTipo2Id            Int?                  // Tipología tipo II (antes Subtipo)
   objetivoId                  Int?
+  tipologiaTipo3              String?               // Tipología tipo III (manual)
+  tipologiaTipo4              String?               // Tipología tipo IV (manual)
   origen                      String?
   vicepresidenciaGerenciaAlta String?
   gerencia                    String?
@@ -179,8 +206,8 @@ model Riesgo {
   priorizacion                PriorizacionRiesgo?
   objetivo                    Objetivo?             @relation(fields: [objetivoId], references: [id])
   proceso                     Proceso               @relation(fields: [procesoId], references: [id])
-  subtipoRiesgoRelacion       SubtipoRiesgo?        @relation(fields: [subtipoRiesgoId], references: [id])
-  tipoRiesgoRelacion          TipoRiesgo?           @relation(fields: [tipoRiesgoId], references: [id])
+  tipologiaTipo1Relacion      TipoRiesgo?           @relation(fields: [tipologiaTipo1Id], references: [id])
+  tipologiaTipo2Relacion      SubtipoRiesgo?        @relation(fields: [tipologiaTipo2Id], references: [id])
 
   @@unique([procesoId, numero])
   @@index([procesoId])
@@ -306,6 +333,8 @@ model Control {
   createdAt             DateTime @default(now())
   updatedAt             DateTime @updatedAt
   riesgo                Riesgo   @relation(fields: [riesgoId], references: [id], onDelete: Cascade)
+
+  @@index([riesgoId])
 }
 
 model Incidencia {
@@ -501,6 +530,9 @@ model Observacion {
   updatedAt DateTime @updatedAt
   autor     Usuario  @relation("AutorObservacion", fields: [autorId], references: [id])
   proceso   Proceso  @relation(fields: [procesoId], references: [id], onDelete: Cascade)
+
+  @@index([procesoId])
+  @@index([autorId])
 }
 
 model EventoMaterializado {
@@ -513,23 +545,8 @@ model EventoMaterializado {
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
   riesgo           Riesgo   @relation(fields: [riesgoId], references: [id], onDelete: Cascade)
-}
 
-model Benchmarking {
-  id            Int      @id @default(autoincrement())
-  procesoId     Int
-  entidad       String?
-  indicador     String?
-  valor         String?
-  comparacion   String?
-  empresa       String?
-  numero        Int?
-  riesgo        String?
-  clasificacion String?
-  calificacion  Int?
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
-  proceso       Proceso  @relation(fields: [procesoId], references: [id], onDelete: Cascade)
+  @@index([riesgoId])
 }
 
 model Documento {
@@ -544,6 +561,8 @@ model Documento {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   proceso   Proceso  @relation(fields: [procesoId], references: [id], onDelete: Cascade)
+
+  @@index([procesoId])
 }
 
 model ConfiguracionResidual {
@@ -721,4 +740,5 @@ model AuditLog {
   @@index([createdAt])
   @@index([tabla, accion])
   @@index([createdAt, tabla])
+  @@index([usuarioId, createdAt])
 }

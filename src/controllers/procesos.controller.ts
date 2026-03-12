@@ -1,7 +1,7 @@
 import { Request, Response } from 'express';
 import prisma from '../prisma';
 import { getDeleteErrorMessage } from '../utils/prismaErrors';
-import { redisGet, redisSet } from '../redisClient';
+import { redisGet, redisSet, redisDel } from '../redisClient';
 
 export const getProcesos = async (req: Request, res: Response) => {
     try {
@@ -151,6 +151,10 @@ export const getProcesoById = async (req: Request, res: Response) => {
                 analisis: true,
                 documentoUrl: true,
                 documentoNombre: true,
+                documentoCaracterizacionUrl: true,
+                documentoCaracterizacionNombre: true,
+                documentoFlujoGramaUrl: true,
+                documentoFlujoGramaNombre: true,
                 createdAt: true,
                 updatedAt: true,
                 sigla: true,
@@ -194,14 +198,15 @@ export const getProcesoById = async (req: Request, res: Response) => {
                         descripcion: true,
                         numeroIdentificacion: true,
                         clasificacion: true,
-                        tipoRiesgoId: true,
-                        subtipoRiesgoId: true
+                        tipologiaTipo1Id: true,
+                        tipologiaTipo2Id: true
                     },
                     take: 100
                 },
                 dofaItems: true,
                 normatividades: true,
                 contextos: true,
+                contextoItems: true,
                 participantes: {
                     select: {
                         id: true,
@@ -268,9 +273,7 @@ export const createProceso = async (req: Request, res: Response) => {
             }
         }
         
-        // OPTIMIZADO: Invalidar caché de procesos
-        await redisSet('procesos:all', null, 0);
-        
+        await redisDel('procesos:all');
         res.json(nuevoProceso);
     } catch (error) {
         res.status(500).json({
@@ -282,7 +285,7 @@ export const createProceso = async (req: Request, res: Response) => {
 
 export const updateProceso = async (req: Request, res: Response) => {
     const id = Number(req.params.id);
-    const { dofaItems, normatividades, contextos, participantesIds, id: bodyId, responsableId, areaId, ...rest } = req.body;
+    const { dofaItems, normatividades, contextos, contextoItems, participantesIds, id: bodyId, responsableId, areaId, ...rest } = req.body;
     try {
         const updateData: any = { ...rest };
 
@@ -319,15 +322,23 @@ export const updateProceso = async (req: Request, res: Response) => {
         }
         if (areaId) updateData.areaId = Number(areaId);
 
+        // DOFA: solo 4 dimensiones (Fortalezas, Oportunidades, Debilidades, Amenazas). Estrategias FO/FA/DO/DA se borran.
+        const TIPOS_DOFA_PERMITIDOS = ['FORTALEZA', 'OPORTUNIDAD', 'DEBILIDAD', 'AMENAZA'];
         if (dofaItems) {
+            const itemsFiltrados = dofaItems.filter((item: any) =>
+                TIPOS_DOFA_PERMITIDOS.includes(String(item.tipo).toUpperCase()));
             updateData.dofaItems = {
                 deleteMany: {},
-                create: dofaItems.map((item: any) => ({
-                    tipo: item.tipo,
+                create: itemsFiltrados.map((item: any) => ({
+                    tipo: String(item.tipo).toUpperCase(),
                     descripcion: item.descripcion
                 }))
             };
         }
+        // Borrar siempre ítems de estrategias DOFA (FO, FA, DO, DA) si existieran en BD
+        await prisma.dofaItem.deleteMany({
+            where: { procesoId: id, tipo: { in: ['FO', 'FA', 'DO', 'DA'] } }
+        }).catch(() => {});
 
         if (normatividades) {
             updateData.normatividades = {
@@ -358,6 +369,29 @@ export const updateProceso = async (req: Request, res: Response) => {
             };
         }
 
+        if (contextoItems && Array.isArray(contextoItems)) {
+            const validSignos = ['POSITIVO', 'NEGATIVO'];
+            const validDofa = ['FORTALEZA', 'OPORTUNIDAD', 'DEBILIDAD', 'AMENAZA'];
+            const items = contextoItems
+                .filter((item: any) => item && item.tipo && validSignos.includes(String(item.signo).toUpperCase()) && item.descripcion != null)
+                .map((item: any) => {
+                    const payload: Record<string, unknown> = {
+                        tipo: String(item.tipo),
+                        signo: String(item.signo).toUpperCase(),
+                        descripcion: String(item.descripcion)
+                    };
+                    if (item.enviarADofa === true && item.dofaDimension && validDofa.includes(String(item.dofaDimension).toUpperCase())) {
+                        payload.enviarADofa = true;
+                        payload.dofaDimension = String(item.dofaDimension).toUpperCase();
+                    }
+                    return payload;
+                });
+            updateData.contextoItems = {
+                deleteMany: {},
+                create: items
+            };
+        }
+
         if (participantesIds) {
             updateData.participantes = {
                 set: (participantesIds as string[]).map((id) => ({ id: Number(id) }))
@@ -371,6 +405,7 @@ export const updateProceso = async (req: Request, res: Response) => {
                 dofaItems: true,
                 normatividades: true,
                 contextos: true,
+                contextoItems: true,
                 participantes: true,
             }
         });
@@ -418,9 +453,9 @@ export const updateProceso = async (req: Request, res: Response) => {
             }
         }
 
-        // OPTIMIZADO: Invalidar caché de procesos
-        await redisSet('procesos:all', null, 0);
-        await redisSet(`proceso:${id}`, null, 0);
+        await redisDel('procesos:all');
+        await redisDel(`proceso:${id}`);
+        if (dofaItems) await redisDel(`dofa:proceso:${id}`);
 
         // Si se actualizó la sigla, actualizar numeroIdentificacion de todos los riesgos del proceso
         if (siglaActualizada && nuevaSigla) {
@@ -457,8 +492,8 @@ export const deleteProceso = async (req: Request, res: Response) => {
     const id = Number(req.params.id);
     try {
         await prisma.proceso.delete({ where: { id } });
-        await redisSet('procesos:all', null, 0);
-        await redisSet(`proceso:${id}`, null, 0);
+        await redisDel('procesos:all');
+        await redisDel(`proceso:${id}`);
         res.json({ message: 'Proceso deleted' });
     } catch (error) {
         const msg = getDeleteErrorMessage(error, 'proceso', 'riesgos, evaluaciones, responsables o asignaciones');

@@ -1,16 +1,13 @@
 import { Request, Response } from 'express';
 import prisma from '../prisma';
-import { redisGet, redisSet } from '../redisClient';
+import { redisGet, redisSet, redisDel } from '../redisClient';
 import { recalcularResidualPorRiesgo } from '../services/recalculoResidual.service';
 
-/** Invalida caché de listado de riesgos del proceso (con y sin causas) para que el frontend vea datos actualizados */
+/** Invalida caché de listado de riesgos del proceso para que el frontend vea datos actualizados */
 async function invalidarCacheRiesgosProceso(procesoId: number): Promise<void> {
     if (!procesoId) return;
     const base = `riesgos:proceso:${procesoId}:page:1:size:50:causas:`;
-    await Promise.all([
-        redisSet(`${base}false`, null, 0),
-        redisSet(`${base}true`, null, 0)
-    ]).catch(() => {});
+    await Promise.all([redisDel(`${base}false`), redisDel(`${base}true`)]).catch(() => {});
 }
 
 export const getRiesgos = async (req: Request, res: Response) => {
@@ -67,8 +64,8 @@ export const getRiesgos = async (req: Request, res: Response) => {
                     sigla: true,
                 }
             },
-            tipoRiesgoRelacion: { select: { id: true, nombre: true } },
-            subtipoRiesgoRelacion: { select: { id: true, nombre: true } }
+            tipologiaTipo1Relacion: { select: { id: true, nombre: true } },
+            tipologiaTipo2Relacion: { select: { id: true, nombre: true } }
         };
         
         // Incluir causas solo si se solicita
@@ -101,8 +98,10 @@ export const getRiesgos = async (req: Request, res: Response) => {
         const totalPages = total > 0 ? Math.ceil(total / take) : 0;
         const data = riesgos.map((r: any) => ({
             ...r,
-            tipoRiesgo: r.tipoRiesgoRelacion?.nombre ?? null,
-            subtipoRiesgo: r.subtipoRiesgoRelacion?.nombre ?? null
+            tipoRiesgo: r.tipologiaTipo1Relacion?.nombre ?? null,
+            subtipoRiesgo: r.tipologiaTipo2Relacion?.nombre ?? null,
+            tipoRiesgoId: r.tipologiaTipo1Id ?? null,
+            subtipoRiesgoId: r.tipologiaTipo2Id ?? null
         }));
 
         const payload = {
@@ -152,17 +151,19 @@ export const getRiesgoById = async (req: Request, res: Response) => {
                 descripcion: true,
                 clasificacion: true,
                 numeroIdentificacion: true,
-                tipoRiesgoId: true,
-                subtipoRiesgoId: true,
+                tipologiaTipo1Id: true,
+                tipologiaTipo2Id: true,
                 objetivoId: true,
+                tipologiaTipo3: true,
+                tipologiaTipo4: true,
                 origen: true,
                 vicepresidenciaGerenciaAlta: true,
                 gerencia: true,
                 createdAt: true,
                 updatedAt: true,
                 evaluacion: true,
-                tipoRiesgoRelacion: { select: { id: true, nombre: true } },
-                subtipoRiesgoRelacion: { select: { id: true, nombre: true } },
+                tipologiaTipo1Relacion: { select: { id: true, nombre: true } },
+                tipologiaTipo2Relacion: { select: { id: true, nombre: true } },
                 causas: {
                     take: 20,
                     orderBy: { id: 'desc' },
@@ -207,8 +208,10 @@ export const getRiesgoById = async (req: Request, res: Response) => {
         if (!riesgo) return res.status(404).json({ error: 'Riesgo not found' });
         const out = {
             ...riesgo,
-            tipoRiesgo: (riesgo as any).tipoRiesgoRelacion?.nombre ?? null,
-            subtipoRiesgo: (riesgo as any).subtipoRiesgoRelacion?.nombre ?? null
+            tipoRiesgo: (riesgo as any).tipologiaTipo1Relacion?.nombre ?? null,
+            subtipoRiesgo: (riesgo as any).tipologiaTipo2Relacion?.nombre ?? null,
+            tipoRiesgoId: (riesgo as any).tipologiaTipo1Id ?? null,
+            subtipoRiesgoId: (riesgo as any).tipologiaTipo2Id ?? null
         };
         await redisSet(cacheKey, out, 120);
         res.json(out);
@@ -263,9 +266,11 @@ export const createRiesgo = async (req: Request, res: Response) => {
             descripcion: String(riesgoData.descripcion ?? ''),
             clasificacion: riesgoData.clasificacion ?? null,
             numeroIdentificacion,
-            tipoRiesgoId: riesgoData.tipoRiesgoId != null ? Number(riesgoData.tipoRiesgoId) : null,
-            subtipoRiesgoId: riesgoData.subtipoRiesgoId != null ? Number(riesgoData.subtipoRiesgoId) : null,
+            tipologiaTipo1Id: riesgoData.tipoRiesgoId != null ? Number(riesgoData.tipoRiesgoId) : null,
+            tipologiaTipo2Id: riesgoData.subtipoRiesgoId != null ? Number(riesgoData.subtipoRiesgoId) : null,
             objetivoId: riesgoData.objetivoId != null ? Number(riesgoData.objetivoId) : null,
+            tipologiaTipo3: riesgoData.tipologiaTipo3 != null && riesgoData.tipologiaTipo3 !== '' ? String(riesgoData.tipologiaTipo3) : null,
+            tipologiaTipo4: riesgoData.tipologiaTipo4 != null && riesgoData.tipologiaTipo4 !== '' ? String(riesgoData.tipologiaTipo4) : null,
             origen: riesgoData.origen ?? null,
             vicepresidenciaGerenciaAlta: riesgoData.vicepresidenciaGerenciaAlta ?? null,
             gerencia: riesgoData.gerencia ?? null
@@ -351,9 +356,11 @@ export const updateRiesgo = async (req: Request, res: Response) => {
         if (body.descripcion !== undefined) data.descripcion = body.descripcion;
         if (body.clasificacion !== undefined) data.clasificacion = body.clasificacion;
         if (body.numeroIdentificacion !== undefined) data.numeroIdentificacion = body.numeroIdentificacion;
-        if (body.tipoRiesgoId !== undefined) data.tipoRiesgoId = body.tipoRiesgoId != null ? Number(body.tipoRiesgoId) : null;
-        if (body.subtipoRiesgoId !== undefined) data.subtipoRiesgoId = body.subtipoRiesgoId != null ? Number(body.subtipoRiesgoId) : null;
+        if (body.tipoRiesgoId !== undefined || body.tipologiaTipo1Id !== undefined) data.tipologiaTipo1Id = (body.tipologiaTipo1Id ?? body.tipoRiesgoId) != null ? Number(body.tipologiaTipo1Id ?? body.tipoRiesgoId) : null;
+        if (body.subtipoRiesgoId !== undefined || body.tipologiaTipo2Id !== undefined) data.tipologiaTipo2Id = (body.tipologiaTipo2Id ?? body.subtipoRiesgoId) != null ? Number(body.tipologiaTipo2Id ?? body.subtipoRiesgoId) : null;
         if (body.objetivoId !== undefined) data.objetivoId = body.objetivoId != null ? Number(body.objetivoId) : null;
+        if (body.tipologiaTipo3 !== undefined) data.tipologiaTipo3 = body.tipologiaTipo3 == null || body.tipologiaTipo3 === '' ? null : String(body.tipologiaTipo3);
+        if (body.tipologiaTipo4 !== undefined) data.tipologiaTipo4 = body.tipologiaTipo4 == null || body.tipologiaTipo4 === '' ? null : String(body.tipologiaTipo4);
         if (body.origen !== undefined) data.origen = body.origen;
         if (body.vicepresidenciaGerenciaAlta !== undefined) data.vicepresidenciaGerenciaAlta = body.vicepresidenciaGerenciaAlta;
         if (body.gerencia !== undefined) data.gerencia = body.gerencia;
@@ -409,8 +416,7 @@ export const updateRiesgo = async (req: Request, res: Response) => {
             await recalcularRiesgoInherenteDesdeCausas(id);
         }
 
-        // OPTIMIZADO: Invalidar caché relacionado (con y sin causas para que el frontend vea cambios)
-        await redisSet(`riesgo:${id}`, null, 0);
+        await redisDel(`riesgo:${id}`);
         if (updated.procesoId) {
             await invalidarCacheRiesgosProceso(updated.procesoId);
         }
@@ -431,9 +437,7 @@ export const deleteRiesgo = async (req: Request, res: Response) => {
         });
         
         await prisma.riesgo.delete({ where: { id } });
-        
-        // OPTIMIZADO: Invalidar caché relacionado
-        await redisSet(`riesgo:${id}`, null, 0);
+        await redisDel(`riesgo:${id}`);
         if (riesgo?.procesoId) {
             await invalidarCacheRiesgosProceso(riesgo.procesoId);
         }
