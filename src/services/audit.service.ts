@@ -121,13 +121,26 @@ export async function obtenerHistorial(filtros: FiltrosAuditoria) {
     }
   }
 
-  // Consultar con paginación
+  // Consultar con paginación (select solo campos necesarios para lista; no datosAnteriores/datosNuevos)
   const [logs, total] = await Promise.all([
     prisma.auditLog.findMany({
       where,
       orderBy: { createdAt: 'desc' },
       skip,
       take: pageSize,
+      select: {
+        id: true,
+        usuarioId: true,
+        usuarioNombre: true,
+        usuarioEmail: true,
+        usuarioRole: true,
+        accion: true,
+        tabla: true,
+        registroId: true,
+        registroDesc: true,
+        cambios: true,
+        createdAt: true,
+      },
     }),
     prisma.auditLog.count({ where }),
   ]);

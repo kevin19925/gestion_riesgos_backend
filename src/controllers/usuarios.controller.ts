@@ -5,10 +5,18 @@ import { getDeleteErrorMessage } from '../utils/prismaErrors';
 export const getUsuarios = async (req: Request, res: Response) => {
     try {
         const users = await prisma.usuario.findMany({
-            include: { 
-                cargo: true,
-                role: true
-            }
+            select: {
+                id: true,
+                nombre: true,
+                email: true,
+                activo: true,
+                roleId: true,
+                cargoId: true,
+                createdAt: true,
+                updatedAt: true,
+                cargo: { select: { id: true, nombre: true } },
+                role: { select: { id: true, codigo: true, nombre: true } },
+            },
         });
         res.json(users);
     } catch (error) {
@@ -21,10 +29,18 @@ export const getUsuarioById = async (req: Request, res: Response) => {
     try {
         const user = await prisma.usuario.findUnique({
             where: { id },
-            include: { 
-                cargo: true,
-                role: true
-            }
+            select: {
+                id: true,
+                nombre: true,
+                email: true,
+                activo: true,
+                roleId: true,
+                cargoId: true,
+                createdAt: true,
+                updatedAt: true,
+                cargo: { select: { id: true, nombre: true } },
+                role: { select: { id: true, codigo: true, nombre: true } },
+            },
         });
         if (!user) return res.status(404).json({ error: 'User not found' });
         res.json(user);
@@ -80,10 +96,18 @@ export const createUsuario = async (req: Request, res: Response) => {
 
         const user = await prisma.usuario.findFirst({
             where: { email: emailStr },
-            include: { 
-                cargo: true,
-                role: true
-            }
+            select: {
+                id: true,
+                nombre: true,
+                email: true,
+                activo: true,
+                roleId: true,
+                cargoId: true,
+                createdAt: true,
+                updatedAt: true,
+                cargo: { select: { id: true, nombre: true } },
+                role: { select: { id: true, codigo: true, nombre: true } },
+            },
         });
         
         res.status(201).json(user);
@@ -117,10 +141,18 @@ export const updateUsuario = async (req: Request, res: Response) => {
         const user = await prisma.usuario.update({
             where: { id },
             data: updateData,
-            include: { 
-                cargo: true,
-                role: true
-            }
+            select: {
+                id: true,
+                nombre: true,
+                email: true,
+                activo: true,
+                roleId: true,
+                cargoId: true,
+                createdAt: true,
+                updatedAt: true,
+                cargo: { select: { id: true, nombre: true } },
+                role: { select: { id: true, codigo: true, nombre: true } },
+            },
         });
         res.json(user);
     } catch (error) {
