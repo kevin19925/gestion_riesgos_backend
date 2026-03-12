@@ -17,8 +17,8 @@ export const getPlanes = async (req: Request, res: Response) => {
         skip,
         take: pageSize,
         include: {
-          riesgo: { include: { proceso: true } },
-          incidencia: { include: { proceso: true } },
+          riesgo: { select: { id: true, procesoId: true, proceso: { select: { id: true, nombre: true, sigla: true } } } },
+          incidencia: { select: { id: true, procesoId: true, proceso: { select: { id: true, nombre: true, sigla: true } } } },
         },
         orderBy: { createdAt: "desc" },
       }),

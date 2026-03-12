@@ -20,7 +20,16 @@ export const getRoleById = async (req: Request, res: Response) => {
     try {
         const role = await prisma.role.findUnique({
             where: { id },
-            include: { usuarios: true }
+            select: {
+                id: true,
+                codigo: true,
+                nombre: true,
+                descripcion: true,
+                ambito: true,
+                permisos: true,
+                activo: true,
+                usuarios: { select: { id: true, nombre: true, email: true } },
+            },
         });
         if (!role) return res.status(404).json({ error: 'Role not found' });
         res.json(role);

@@ -10,8 +10,10 @@ export const getProcesos = async (req: Request, res: Response) => {
         const cached = await redisGet<any>(cacheKey);
         if (cached) return res.json(cached);
 
-        // OPTIMIZADO: Usar select específico en lugar de include completo
+        // OPTIMIZADO: Límite para no colgar con miles de procesos
         const procesos = await prisma.proceso.findMany({
+            take: 2000,
+            orderBy: { createdAt: 'desc' },
             select: {
                 id: true,
                 nombre: true,
@@ -80,7 +82,6 @@ export const getProcesos = async (req: Request, res: Response) => {
                     }
                 }
             },
-            orderBy: { createdAt: 'desc' }
         });
         
         // Mapear para agregar areaNombre y lista de responsables para facilitar uso en frontend
@@ -203,7 +204,7 @@ export const getProcesoById = async (req: Request, res: Response) => {
                     },
                     take: 100
                 },
-                dofaItems: true,
+                dofaItems: { select: { id: true, tipo: true, descripcion: true } },
                 normatividades: true,
                 contextos: true,
                 contextoItems: true,
