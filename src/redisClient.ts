@@ -78,3 +78,15 @@ export async function redisDel(key: string): Promise<void> {
   }
 }
 
+/** Elimina varias claves en una sola llamada (más eficiente que N redisDel) */
+export async function redisDelMany(keys: string[]): Promise<void> {
+  if (keys.length === 0) return;
+  try {
+    const c = await getRedisClient();
+    if (!c) return;
+    await c.del(keys);
+  } catch (err) {
+    // ignore
+  }
+}
+

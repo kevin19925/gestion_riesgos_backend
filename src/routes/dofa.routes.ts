@@ -5,15 +5,13 @@ import {
   createDofaElemento,
   updateDofaElemento,
   deleteDofaElemento,
-  getDofaEstrategias
 } from '../controllers/dofa.controller';
 
 const router = Router();
 
-// DOFA por proceso
+// DOFA por proceso (solo Fortalezas, Oportunidades, Debilidades, Amenazas)
 router.get('/proceso/:procesoId', getDofaByProceso);
 router.post('/proceso/:procesoId', createDofaElemento);
-router.get('/proceso/:procesoId/estrategias', getDofaEstrategias);
 
 // Elementos individuales
 router.get('/:id', getDofaElementoById);

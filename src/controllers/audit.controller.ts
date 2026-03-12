@@ -5,10 +5,13 @@
 
 import { Request, Response } from 'express';
 import * as auditService from '../services/audit.service';
+import { redisGet, redisSet } from '../redisClient';
+
+const CACHE_TTL_AUDIT_LOGS = 30; // 30 segundos para no saturar BD al cambiar de pestaña
 
 /**
  * GET /api/audit/logs
- * Obtiene el historial de auditoría con filtros y paginación
+ * Obtiene el historial de auditoría con filtros y paginación (con caché corto)
  */
 export async function getLogs(req: Request, res: Response) {
   try {
@@ -32,7 +35,17 @@ export async function getLogs(req: Request, res: Response) {
       pageSize: pageSize ? Number(pageSize) : 50,
     };
 
+    const cacheKey = `audit:logs:${filtros.usuarioId ?? 'all'}:${filtros.tabla ?? ''}:${filtros.accion ?? ''}:${filtros.page}:${filtros.pageSize}:${filtros.fechaDesde?.toISOString() ?? ''}:${filtros.fechaHasta?.toISOString() ?? ''}`;
+    try {
+      const cached = await redisGet<any>(cacheKey);
+      if (cached) return res.json(cached);
+    } catch (_) { /* Redis no disponible: seguir sin caché */ }
+
     const resultado = await auditService.obtenerHistorial(filtros);
+
+    try {
+      await redisSet(cacheKey, resultado, CACHE_TTL_AUDIT_LOGS);
+    } catch (_) { /* Redis no disponible: no guardar caché */ }
 
     res.json(resultado);
   } catch (error: any) {

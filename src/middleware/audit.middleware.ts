@@ -24,8 +24,9 @@ export function auditMiddleware() {
       return next();
     }
 
-    // Obtener la tabla desde la ruta
-    const tabla = auditService.obtenerTablaDesdeRuta(req.path);
+    // Obtener la tabla desde la ruta (originalUrl para tener siempre /api/...)
+    const pathParaAudit = (req.originalUrl || req.url || req.path || '').split('?')[0];
+    const tabla = auditService.obtenerTablaDesdeRuta(pathParaAudit);
     if (!tabla) {
       // No es una ruta auditable
       return next();
@@ -75,7 +76,8 @@ export function auditMiddleware() {
     } 
     // Si no está en params, intentar extraer de la URL
     else {
-      const match = req.path.match(/\/(\d+)(?:\/|$)/);
+      const pathParaId = (req.originalUrl || req.url || req.path || '').split('?')[0];
+      const match = pathParaId.match(/\/(\d+)(?:\/|$)/);
       if (match && match[1]) {
         registroId = Number(match[1]);
       }
@@ -84,7 +86,7 @@ export function auditMiddleware() {
     console.log('🔍 [AUDIT] Verificando si obtener datos anteriores:', {
       accion,
       registroId,
-      path: req.path,
+      path: pathParaAudit,
       params: req.params,
       tieneId: !!registroId,
       esUpdateODelete: accion === 'UPDATE' || accion === 'DELETE',
@@ -200,7 +202,8 @@ async function obtenerRegistroAnterior(tabla: string, id: number): Promise<any> 
     Normatividad: prisma.normatividad,
     Contexto: prisma.contexto,
     DofaItem: prisma.dofaItem,
-    Benchmarking: prisma.benchmarking,
+    CalificacionInherenteConfig: prisma.calificacionInherenteConfig,
+    ConfiguracionResidual: prisma.configuracionResidual,
   };
 
   const modelo = tablasPrisma[tabla];

@@ -45,13 +45,11 @@ const prisma = globalForPrisma.prisma || new PrismaClient({
     ],
 });
 
-// Query logging para detectar consultas lentas (> 1 segundo)
+// Query logging: solo consultas lentas (> 800ms) para no ralentizar en producción
+const SLOW_QUERY_MS = 800;
 prisma.$on('query' as never, (e: any) => {
-    if (e.duration > 1000) {
-        console.warn(`⚠️ CONSULTA LENTA DETECTADA:`);
-        console.warn(`   Query: ${e.query}`);
-        console.warn(`   Duración: ${e.duration}ms`);
-        console.warn(`   Params: ${e.params}`);
+    if (e.duration > SLOW_QUERY_MS) {
+        console.warn(`⚠️ CONSULTA LENTA (${e.duration}ms):`, e.query?.substring?.(0, 120) + '...');
     }
 });
 

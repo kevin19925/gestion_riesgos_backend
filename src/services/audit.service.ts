@@ -32,8 +32,10 @@ export interface FiltrosAuditoria {
   pageSize?: number;
 }
 
-// Mapeo de rutas a nombres de tablas
+// Mapeo de rutas a nombres de tablas (rutas deben coincidir con app: app.use('/api', routes))
+// Rutas más específicas primero para que /api/riesgos/causas coincida antes que /api/riesgos
 const RUTA_A_TABLA: Record<string, string> = {
+  '/api/riesgos/causas': 'CausaRiesgo',
   '/api/riesgos': 'Riesgo',
   '/api/procesos': 'Proceso',
   '/api/usuarios': 'Usuario',
@@ -41,7 +43,6 @@ const RUTA_A_TABLA: Record<string, string> = {
   '/api/planes-accion': 'PlanAccion',
   '/api/evaluaciones': 'EvaluacionRiesgo',
   '/api/priorizaciones': 'PriorizacionRiesgo',
-  '/api/causas': 'CausaRiesgo',
   '/api/controles-riesgo': 'ControlRiesgo',
   '/api/controles': 'Control',
   '/api/areas': 'Area',
@@ -49,10 +50,11 @@ const RUTA_A_TABLA: Record<string, string> = {
   '/api/cargos': 'Cargo',
   '/api/gerencias': 'Gerencia',
   '/api/observaciones': 'Observacion',
-  '/api/normatividades': 'Normatividad',
-  '/api/contextos': 'Contexto',
+  '/api/normatividad': 'Normatividad',
+  '/api/contexto': 'Contexto',
   '/api/dofa': 'DofaItem',
-  '/api/benchmarking': 'Benchmarking',
+  '/api/calificacion-inherente': 'CalificacionInherenteConfig',
+  '/api/configuracion-residual': 'ConfiguracionResidual',
 };
 
 /**
@@ -256,8 +258,11 @@ export function obtenerDescripcionRegistro(tabla: string, datos: any): string {
     case 'DofaItem':
       return `${datos.tipo}: ${datos.descripcion?.substring(0, 40) || ''}`;
 
-    case 'Benchmarking':
-      return datos.entidad || datos.empresa || '';
+    case 'CalificacionInherenteConfig':
+      return datos.nombre || `Config calificación inherente ID: ${datos.id}`;
+
+    case 'ConfiguracionResidual':
+      return datos.nombre || `Config residual ID: ${datos.id}`;
 
     default:
       return datos.nombre || datos.descripcion?.substring(0, 50) || `ID: ${datos.id}`;
@@ -266,19 +271,16 @@ export function obtenerDescripcionRegistro(tabla: string, datos: any): string {
 
 /**
  * Obtiene el nombre de la tabla desde la ruta de la API
+ * Orden: rutas más largas primero para que /api/riesgos/causas/1 coincida con CausaRiesgo y no con Riesgo
  */
 export function obtenerTablaDesdeRuta(ruta: string): string | null {
-  // Limpiar la ruta (quitar query params y trailing slash)
   const rutaLimpia = ruta.split('?')[0].replace(/\/$/, '');
 
-  // Buscar coincidencia exacta
-  if (RUTA_A_TABLA[rutaLimpia]) {
-    return RUTA_A_TABLA[rutaLimpia];
-  }
+  // Ordenar por longitud descendente para priorizar rutas más específicas
+  const entradas = Object.entries(RUTA_A_TABLA).sort(([a], [b]) => b.length - a.length);
 
-  // Buscar coincidencia parcial (para rutas con ID, ej: /api/riesgos/123)
-  for (const [rutaBase, tabla] of Object.entries(RUTA_A_TABLA)) {
-    if (rutaLimpia.startsWith(rutaBase)) {
+  for (const [rutaBase, tabla] of entradas) {
+    if (rutaLimpia === rutaBase || rutaLimpia.startsWith(rutaBase + '/')) {
       return tabla;
     }
   }

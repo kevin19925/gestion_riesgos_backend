@@ -10,6 +10,7 @@
     "postinstall": "npx prisma generate && tsc",
     "lint": "eslint src/**/*.ts",
     "test": "jest",
+    "verificar-api": "node scripts/verificar-api.mjs",
     "seed": "npx tsx prisma/seed-completo.ts",
     "seed:basic": "npx tsx prisma/seed.ts",
     "drop-notif-tarea": "npx tsx scripts/drop-notificacion-tarea.ts",
