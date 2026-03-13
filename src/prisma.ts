@@ -9,9 +9,9 @@ dotenv.config();
 const url = (process.env.DATABASE_URL || '').replace(/^"|"$/g, '');
 const pool = new Pool({
     connectionString: url,
-    max: 20,                          // Límite de 20 conexiones simultáneas
+    max: 30,                          // Aumentado a 30 conexiones
     idleTimeoutMillis: 30000,         // 30s para cerrar conexiones inactivas
-    connectionTimeoutMillis: 2000,    // 2s para fallar si no hay conexión disponible
+    connectionTimeoutMillis: 10000,   // Aumentado a 10s para evitar fallos por latencia de Azure
     ssl: {
         rejectUnauthorized: false     // Obligatorio para Azure
     }
@@ -50,6 +50,7 @@ const SLOW_QUERY_MS = 800;
 prisma.$on('query' as never, (e: any) => {
     if (e.duration > SLOW_QUERY_MS) {
         console.warn(`⚠️ CONSULTA LENTA (${e.duration}ms):`, e.query?.substring?.(0, 120) + '...');
+        console.log(`📊 Pool Stats - Total: ${pool.totalCount}, Activas: ${pool.totalCount - pool.idleCount}, Inactivas: ${pool.idleCount}, Esperando: ${pool.waitingCount}`);
     }
 });
 

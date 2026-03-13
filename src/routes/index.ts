@@ -23,6 +23,7 @@ import calificacionInherenteRoutes from './calificacion-inherente.routes';
 import configuracionResidualRoutes from './configuracionResidual.routes';
 import debugRoutes from './debug.routes';
 import auditRoutes from './audit.routes';
+import iaRoutes from './ia.routes';
 
 const router = Router();
 
@@ -65,5 +66,6 @@ router.use('/calificacion-inherente', calificacionInherenteRoutes);
 router.use('/configuracion-residual', configuracionResidualRoutes);
 router.use('/debug', debugRoutes); // TEMPORAL - Eliminar en producción
 router.use('/audit', auditRoutes); // Sistema de auditoría
+router.use('/ia', iaRoutes); // IA (Responses API + Mongo)
 
 export default router;
