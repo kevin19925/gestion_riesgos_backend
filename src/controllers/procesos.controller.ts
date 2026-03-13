@@ -411,6 +411,15 @@ export const updateProceso = async (req: Request, res: Response) => {
             }
         });
 
+        // Invalidar caché de este proceso y del listado general para que el frontend vea los cambios al instante
+        try {
+            await redisDel(`proceso:${id}`);
+            await redisDel('procesos:all');
+        } catch (cacheErr) {
+            // No romper la respuesta si falla Redis; solo loguear en consola
+            console.warn('[procesos.updateProceso] No se pudo invalidar caché Redis:', cacheErr);
+        }
+
         // NUEVO: Sincronizar ProcesoResponsable cuando cambia responsableId
         if (responsableId !== undefined) {
             const nuevoResponsableId = responsableId ? Number(responsableId) : null;
