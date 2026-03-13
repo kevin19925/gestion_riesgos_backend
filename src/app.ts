@@ -10,61 +10,76 @@ import routes from './routes';
 const app = express();
 
 // OPTIMIZADO: Comprimir todas las respuestas HTTP (gzip)
-app.use(compression({
+app.use(
+  compression({
     filter: (req, res) => {
-        if (req.headers['x-no-compression']) {
-            return false;
-        }
-        return compression.filter(req, res);
+      if (req.headers['x-no-compression']) {
+        return false;
+      }
+      return compression.filter(req, res);
     },
-    level: 6 // Nivel de compresión (0-9, 6 es el default y buen balance)
-}));
+    level: 6, // Nivel de compresión (0-9, 6 es el default y buen balance)
+  }),
+);
 
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
 // CORS Configuration
 const allowedOrigins = [
-    'http://localhost:5173',
-    'http://127.0.0.1:5173',
-    'http://localhost:3000',
-    'https://gestion-riesgos-app.onrender.com',
-    process.env.CORS_ORIGIN
-].filter(Boolean);
+  'http://localhost:5173',
+  'http://127.0.0.1:5173',
+  'http://localhost:3000',
+  'https://gestion-riesgos-app.onrender.com',
+  // Frontend productivo (por ejemplo https://erm.comware.com.ec)
+  process.env.CORS_ORIGIN,
+].filter(Boolean) as string[];
 
-app.use(cors({
+app.use(
+  cors({
     origin: (origin, callback) => {
-        // Allow requests with no origin (like mobile apps, curl, postman)
-        if (!origin) return callback(null, true);
+      // Allow requests with no origin (like mobile apps, curl, postman)
+      if (!origin) return callback(null, true);
 
-        if (allowedOrigins.indexOf(origin) !== -1) {
-            callback(null, true);
-        } else {
-            callback(null, true); // Allow anyway in production for now
-        }
+      if (allowedOrigins.includes(origin)) {
+        return callback(null, true);
+      }
+
+      // En caso de origen no permitido, devolver error explícito
+      return callback(new Error(`CORS: Origin ${origin} not allowed`));
     },
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization']
-}));
+    allowedHeaders: ['Content-Type', 'Authorization'],
+  }),
+);
+
 // Enhanced Security Headers
-app.use(helmet({
-  contentSecurityPolicy: {
-    directives: {
-      defaultSrc: ["'self'"],
-      styleSrc: ["'self'", "'unsafe-inline'"],
-      scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'"], // Needed for React in dev
-      imgSrc: ["'self'", "data:", "https:"],
-      connectSrc: ["'self'", process.env.CORS_ORIGIN || 'http://localhost:5173'],
+app.use(
+  helmet({
+    contentSecurityPolicy: {
+      directives: {
+        defaultSrc: ["'self'"],
+        styleSrc: ["'self'", "'unsafe-inline'"],
+        scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'"], // Needed for React in dev
+        imgSrc: ["'self'", 'data:', 'https:'],
+        // Permite conexiones desde el frontend y hacia la API
+        connectSrc: [
+          "'self'",
+          process.env.CORS_ORIGIN || 'http://localhost:5173',
+          'https://api-erm.comware.com.ec',
+          'https://erm.comware.com.ec',
+        ],
+      },
     },
-  },
-  crossOriginEmbedderPolicy: false, // Allow external resources
-  hsts: {
-    maxAge: 31536000,
-    includeSubDomains: true,
-    preload: true,
-  },
-}));
+    crossOriginEmbedderPolicy: false, // Allow external resources
+    hsts: {
+      maxAge: 31536000,
+      includeSubDomains: true,
+      preload: true,
+    },
+  }),
+);
 
 // Rate limiting headers (basic)
 app.use((req, res, next) => {
