@@ -85,6 +85,7 @@ export const postChatIAStream = async (req: Request, res: Response) => {
         res.write(`event: ${event}\n`);
       }
       res.write(`data: ${JSON.stringify(data)}\n\n`);
+      (res as any).flush?.();
     };
 
     // Arrancamos el procesamiento en streaming

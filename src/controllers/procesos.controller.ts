@@ -205,9 +205,9 @@ export const getProcesoById = async (req: Request, res: Response) => {
                     take: 100
                 },
                 dofaItems: { select: { id: true, tipo: true, descripcion: true } },
-                normatividades: true,
-                contextos: true,
-                contextoItems: true,
+                normatividades: { select: { id: true, numero: true, nombre: true, estado: true, regulador: true, cumplimiento: true } },
+                contextos: { select: { id: true, tipo: true, descripcion: true } },
+                contextoItems: { select: { id: true, tipo: true, signo: true, descripcion: true, enviarADofa: true, dofaDimension: true } },
                 participantes: {
                     select: {
                         id: true,
@@ -376,6 +376,7 @@ export const updateProceso = async (req: Request, res: Response) => {
             const items = contextoItems
                 .filter((item: any) => item && item.tipo && validSignos.includes(String(item.signo).toUpperCase()) && item.descripcion != null)
                 .map((item: any) => {
+                    // Nunca enviar 'id' en creates; que la BD lo genere
                     const payload: Record<string, unknown> = {
                         tipo: String(item.tipo),
                         signo: String(item.signo).toUpperCase(),
@@ -397,6 +398,11 @@ export const updateProceso = async (req: Request, res: Response) => {
             updateData.participantes = {
                 set: (participantesIds as string[]).map((id) => ({ id: Number(id) }))
             };
+        }
+
+        // Seguridad extra: nunca permitir que se intente actualizar el 'id' del proceso
+        if ((updateData as any).id !== undefined) {
+            delete (updateData as any).id;
         }
 
         const proceso = await prisma.proceso.update({

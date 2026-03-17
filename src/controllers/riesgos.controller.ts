@@ -10,6 +10,14 @@ async function invalidarCacheRiesgosProceso(procesoId: number): Promise<void> {
     await Promise.all([redisDel(`${base}false`), redisDel(`${base}true`)]).catch(() => {});
 }
 
+/** Invalida caché de puntos del mapa (por proceso y global) para que el mapa se actualice */
+async function invalidarCacheMapaPuntos(procesoId?: number | null): Promise<void> {
+    await Promise.all([
+        redisDel('mapa:puntos:all'),
+        ...(procesoId ? [redisDel(`mapa:puntos:${procesoId}`)] : []),
+    ]).catch(() => {});
+}
+
 export const getRiesgos = async (req: Request, res: Response) => {
     const { procesoId, clasificacion, busqueda, page, pageSize, includeCausas } = req.query;
     const where: any = {};
@@ -53,10 +61,20 @@ export const getRiesgos = async (req: Request, res: Response) => {
             if (cached) return res.json(cached);
         }
 
-        // OPTIMIZADO: Include simple - Prisma permite select en el nivel superior
-        // Usar select en el nivel superior para evaluacion y proceso
+        // Solo campos de evaluación necesarios en listado (no todos los ejes de impacto)
         const include: any = {
-            evaluacion: true,
+            evaluacion: {
+                select: {
+                    id: true,
+                    riesgoId: true,
+                    riesgoInherente: true,
+                    nivelRiesgo: true,
+                    probabilidad: true,
+                    impactoGlobal: true,
+                    riesgoResidual: true,
+                    nivelRiesgoResidual: true,
+                },
+            },
             proceso: {
                 select: {
                     id: true,
@@ -419,7 +437,9 @@ export const updateRiesgo = async (req: Request, res: Response) => {
         await redisDel(`riesgo:${id}`);
         if (updated.procesoId) {
             await invalidarCacheRiesgosProceso(updated.procesoId);
+            await invalidarCacheMapaPuntos(updated.procesoId);
         }
+        await invalidarCacheMapaPuntos();
 
         res.json(updated);
     } catch (error) {
@@ -440,8 +460,10 @@ export const deleteRiesgo = async (req: Request, res: Response) => {
         await redisDel(`riesgo:${id}`);
         if (riesgo?.procesoId) {
             await invalidarCacheRiesgosProceso(riesgo.procesoId);
+            await invalidarCacheMapaPuntos(riesgo.procesoId);
         }
-        
+        await invalidarCacheMapaPuntos();
+
         res.json({ message: 'Riesgo deleted' });
     } catch (error) {
         const e = error as any;
@@ -526,6 +548,8 @@ export const getRiesgosRecientes = async (req: Request, res: Response) => {
     }
 };
 
+const MAPA_CACHE_TTL = 90; // segundos: balance entre frescura y velocidad
+
 export const getPuntosMapa = async (req: Request, res: Response) => {
     const { procesoId } = req.query;
     const where: any = {};
@@ -536,15 +560,40 @@ export const getPuntosMapa = async (req: Request, res: Response) => {
     // Si no hay procesoId o es 'all', where estará vacío y se obtendrán TODOS los riesgos
 
     try {
+        const cacheKey = `mapa:puntos:${where.procesoId ?? 'all'}`;
+        const cached = await redisGet<any>(cacheKey);
+        if (cached) {
+            res.setHeader('Cache-Control', 'private, max-age=60');
+            return res.json(cached);
+        }
+
         // Límite cuando no hay filtro por proceso para no devolver miles de registros
         const takeMapa = Object.keys(where).length > 0 ? undefined : 500;
+        // Solo campos de evaluación necesarios para el mapa (evitar traer todos los ejes de impacto)
         const riesgos = await prisma.riesgo.findMany({
             where,
             ...(takeMapa ? { take: takeMapa } : {}),
-            include: {
-                evaluacion: true,
-                proceso: { select: { id: true, nombre: true, sigla: true } }
-            }
+            select: {
+                id: true,
+                descripcion: true,
+                clasificacion: true,
+                numero: true,
+                numeroIdentificacion: true,
+                procesoId: true,
+                evaluacion: {
+                    select: {
+                        riesgoInherente: true,
+                        probabilidad: true,
+                        impactoGlobal: true,
+                        probabilidadResidual: true,
+                        impactoResidual: true,
+                        riesgoResidual: true,
+                        nivelRiesgoResidual: true,
+                        nivelRiesgo: true,
+                    },
+                },
+                proceso: { select: { id: true, nombre: true, sigla: true } },
+            },
         });
 
         // Riesgos que tienen al menos una causa con control (CONTROL o AMBOS): residual se calcula; el resto residual = inherente
@@ -779,16 +828,34 @@ export const getPuntosMapa = async (req: Request, res: Response) => {
                 };
             });
 
+        await redisSet(cacheKey, puntos, MAPA_CACHE_TTL);
+        res.setHeader('Cache-Control', 'private, max-age=60');
         res.json(puntos);
     } catch (error) {
         res.status(500).json({ error: 'Error fetching map points' });
     }
 };
+
 export const getCausas = async (req: Request, res: Response) => {
     try {
-        // Incluir solo causas sin controles anidados para evitar errores de columnas faltantes
+        const { riesgoId, procesoId, limit } = req.query;
+        const where: any = {};
+        if (riesgoId && riesgoId !== 'all') where.riesgoId = Number(riesgoId);
+        if (procesoId && procesoId !== 'all') {
+            where.riesgo = { procesoId: Number(procesoId) };
+        }
+        const take = Math.min(Math.abs(Number(limit) || 500), 1000);
         const causas = await prisma.causaRiesgo.findMany({
-            // Sin include de controles por ahora para evitar errores
+            where,
+            take,
+            orderBy: { id: 'asc' },
+            select: {
+                id: true,
+                descripcion: true,
+                riesgoId: true,
+                tipoGestion: true,
+                gestion: true,
+            },
         });
         res.json(causas);
     } catch (error) {

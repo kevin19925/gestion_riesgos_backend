@@ -1,15 +1,39 @@
 import OpenAI from 'openai';
 import { MongoClient, Db, Collection, ObjectId } from 'mongodb';
+import * as fs from 'fs';
+import * as path from 'path';
 import prisma from '../prisma';
+import { redisGet, redisSet } from '../redisClient';
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
+/** TTL en segundos para el contexto IA (riesgos, procesos, controles, planes). Reduce consultas a DB. */
+const IA_CONTEXT_CACHE_TTL = 90;
+const IA_CONTEXT_CACHE_PREFIX = 'ia:context:';
+
 const MONGODB_URI = process.env.MONGODB_URI!;
 const MONGODB_DB_NAME = process.env.MONGODB_DB_NAME || 'cora_riesgos';
 const COLECCION_CONVERSACIONES = process.env.COLECCION_CONVERSACIONES || 'conversaciones';
 const PROMPT_ID = process.env.PROMPT_ID!;
+
+/** System message CORA: se carga desde el doc del repo y se envía como primer mensaje al modelo. */
+let cachedSystemMessageCora: string | null = null;
+
+function getSystemMessageCora(): string {
+  if (cachedSystemMessageCora) return cachedSystemMessageCora;
+  const docPath = path.join(__dirname, '../../docs/SYSTEM_MESSAGE_CORA.md');
+  try {
+    const raw = fs.readFileSync(docPath, 'utf-8');
+    const match = raw.match(/```\s*\n([\s\S]*?)\n```/);
+    cachedSystemMessageCora = match ? match[1].trim() : raw.trim();
+  } catch (e) {
+    console.warn('[IA] No se pudo cargar SYSTEM_MESSAGE_CORA.md:', (e as Error).message);
+    cachedSystemMessageCora = 'Eres CORA, la IA del sistema de gestión de riesgos. Responde en español con los datos que recibes en el contexto (RIESGOS, PROCESOS, CONTROLES, PLANES).';
+  }
+  return cachedSystemMessageCora;
+}
 
 let mongoClient: MongoClient | null = null;
 let mongoDb: Db | null = null;
@@ -39,43 +63,195 @@ async function getRiesgosResumen(userId: number) {
   const riesgos = await prisma.riesgo.findMany({
     where: { procesoId: { in: ids } },
     select: {
-      numeroIdentificacion: true, numero: true, descripcion: true,
-      proceso: { select: { nombre: true, sigla: true } }
+      numeroIdentificacion: true,
+      numero: true,
+      descripcion: true,
+      clasificacion: true,
+      proceso: { select: { nombre: true, sigla: true } },
+      evaluacion: {
+        select: {
+          nivelRiesgo: true,
+          nivelRiesgoResidual: true,
+          riesgoInherente: true,
+          riesgoResidual: true,
+        },
+      },
     },
-    take: 50
+    take: 100,
   });
-  return riesgos.map(r => `- ${r.numeroIdentificacion || r.numero || 'R'}: ${r.descripcion} (${r.proceso?.nombre || 'N/A'})`);
+
+  return riesgos.map((r) => {
+    const idRiesgo = r.numeroIdentificacion || String(r.numero) || 'R';
+    const procesoNombre = r.proceso?.nombre || 'N/A';
+    const nivel = r.evaluacion?.nivelRiesgo?.trim() || 'Sin calificar';
+    const nivelRes = r.evaluacion?.nivelRiesgoResidual?.trim();
+    const scoreInh = r.evaluacion?.riesgoInherente ?? null;
+    const scoreRes = r.evaluacion?.riesgoResidual ?? null;
+
+    const partesNivel: string[] = [];
+    if (nivelRes) {
+      // Inherente / Residual con posible valor numérico
+      if (nivel) {
+        partesNivel.push(
+          `Inherente: ${nivel}${scoreInh != null ? ` (puntaje: ${scoreInh})` : ''}`,
+        );
+      }
+      partesNivel.push(
+        `Residual: ${nivelRes}${scoreRes != null ? ` (puntaje: ${scoreRes})` : ''}`,
+      );
+    } else if (nivel) {
+      partesNivel.push(
+        `Nivel: ${nivel}${scoreInh != null ? ` (puntaje: ${scoreInh})` : ''}`,
+      );
+    } else {
+      partesNivel.push('Sin calificar');
+    }
+
+    const nivelStr = partesNivel.join(' | ');
+    return `- ${idRiesgo} [${nivelStr}]: ${r.descripcion} (${procesoNombre})`;
+  });
 }
 
 async function getProcesosResumen(userId: number) {
   const asignaciones = await prisma.procesoResponsable.findMany({
     where: { usuarioId: userId, modo: { in: ['director', 'proceso'] } },
-    select: { proceso: { select: { nombre: true, sigla: true } }, modo: true }
+    select: {
+      modo: true,
+      proceso: {
+        select: {
+          nombre: true,
+          sigla: true,
+          area: {
+            select: {
+              nombre: true,
+            },
+          },
+        },
+      },
+    },
   });
-  return asignaciones.map(a => `${a.proceso?.nombre} [${a.proceso?.sigla}] (Rol: ${a.modo})`);
+
+  // Procesos únicos por sigla/nombre/área para evitar duplicados
+  const lines: string[] = [];
+  const seen = new Set<string>();
+
+  for (const a of asignaciones) {
+    const nombre = a.proceso?.nombre || 'Proceso sin nombre';
+    const sigla = a.proceso?.sigla || '';
+    const areaNombre = a.proceso?.area?.nombre || 'Área no definida';
+    const rol = a.modo || 'proceso';
+    const key = `${nombre}::${sigla}::${areaNombre}::${rol}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const siglaPart = sigla ? ` [${sigla}]` : '';
+    lines.push(`${nombre}${siglaPart} | Área: ${areaNombre} (Rol: ${rol})`);
+  }
+
+  return lines;
 }
 
-async function getControlesResumen(userId: number) {
+const CONTROLES_TAKE = 500;
+const PLANES_TAKE = 500;
+
+async function getControlesResumen(userId: number): Promise<{ lines: string[]; total: number }> {
   const asignaciones = await prisma.procesoResponsable.findMany({
     where: { usuarioId: userId, modo: { in: ['director', 'proceso'] } },
     select: { procesoId: true }
   });
   const ids = asignaciones.map(a => a.procesoId);
-  const controles = await prisma.controlRiesgo.findMany({
-    where: { causaRiesgo: { riesgo: { procesoId: { in: ids } } } },
-    select: { descripcion: true, causaRiesgo: { select: { riesgo: { select: { numeroIdentificacion: true, numero: true } } } } },
-    take: 20
+  const whereControles = { causaRiesgo: { riesgo: { procesoId: { in: ids } } } };
+  const [total, controles] = await Promise.all([
+    prisma.controlRiesgo.count({ where: whereControles }),
+    prisma.controlRiesgo.findMany({
+      where: whereControles,
+      select: {
+        descripcion: true,
+        causaRiesgo: {
+          select: {
+            riesgo: {
+              select: {
+                numeroIdentificacion: true,
+                numero: true,
+                proceso: { select: { sigla: true, nombre: true } },
+              },
+            },
+          },
+        },
+      },
+      take: CONTROLES_TAKE,
+    }),
+  ]);
+  const lines = controles.map(c => {
+    const r = c.causaRiesgo.riesgo;
+    const idRiesgo = r.numeroIdentificacion || String(r.numero || '') || 'Riesgo';
+    const sigla = r.proceso?.sigla || '';
+    const procNombre = r.proceso?.nombre || '';
+    const riesgoLabel = sigla ? `${idRiesgo} [${sigla}]` : idRiesgo;
+    const procLabel = procNombre ? ` (${procNombre})` : '';
+    return `- Control: ${c.descripcion} -> Riesgo: ${riesgoLabel}${procLabel}`;
   });
-  return controles.map(c => `- Control: ${c.descripcion} (Riesgo: ${c.causaRiesgo.riesgo.numeroIdentificacion || c.causaRiesgo.riesgo.numero})`);
+  return { lines, total };
 }
 
-async function getPlanesResumen(userId: number) {
-  const planes = await prisma.planAccion.findMany({
-    where: { responsable: { contains: String(userId) } },
-    select: { descripcion: true, estado: true },
-    take: 20
+async function getPlanesResumen(userId: number): Promise<{ lines: string[]; total: number }> {
+  const asignaciones = await prisma.procesoResponsable.findMany({
+    where: { usuarioId: userId, modo: { in: ['director', 'proceso'] } },
+    select: { procesoId: true },
   });
-  return planes.map(p => `- Plan: ${p.descripcion} [${p.estado}]`);
+  const procesoIds = Array.from(new Set(asignaciones.map((a) => a.procesoId)));
+  if (!procesoIds.length) return { lines: [], total: 0 };
+
+  const wherePlanes = {
+    OR: [
+      { riesgo: { procesoId: { in: procesoIds } } },
+      { incidencia: { procesoId: { in: procesoIds } } },
+      { responsable: { contains: String(userId), mode: 'insensitive' as const } },
+    ],
+  };
+
+  const [total, planes] = await Promise.all([
+    prisma.planAccion.count({ where: wherePlanes }),
+    prisma.planAccion.findMany({
+      where: wherePlanes,
+      select: {
+        descripcion: true,
+        estado: true,
+        riesgo: {
+          select: {
+            numeroIdentificacion: true,
+            numero: true,
+            proceso: { select: { sigla: true, nombre: true } },
+          },
+        },
+        incidencia: {
+          select: {
+            id: true,
+            proceso: { select: { sigla: true, nombre: true } },
+          },
+        },
+      },
+      take: PLANES_TAKE,
+    }),
+  ]);
+
+  const lines = planes.map((p) => {
+    if (p.riesgo) {
+      const idRiesgo = p.riesgo.numeroIdentificacion || String(p.riesgo.numero || '') || 'Riesgo';
+      const sigla = p.riesgo.proceso?.sigla || '';
+      const procNombre = p.riesgo.proceso?.nombre || '';
+      const riesgoLabel = sigla ? `${idRiesgo} [${sigla}]` : idRiesgo;
+      const procesoLabel = procNombre ? ` (${procNombre})` : '';
+      return `- Plan: ${p.descripcion} [${p.estado}] -> Riesgo: ${riesgoLabel}${procesoLabel}`;
+    }
+
+    const incId = p.incidencia?.id != null ? `Incidencia ${p.incidencia.id}` : 'Incidencia';
+    const siglaInc = p.incidencia?.proceso?.sigla || '';
+    const procInc = p.incidencia?.proceso?.nombre || '';
+    const incLabel = siglaInc ? `${incId} [${siglaInc}]` : incId;
+    const procLabel = procInc ? ` (${procInc})` : '';
+    return `- Plan: ${p.descripcion} [${p.estado}] -> ${incLabel}${procLabel}`;
+  });
+  return { lines, total };
 }
 
 // Mapeo de tipos de contexto interno a etiquetas legibles
@@ -178,6 +354,43 @@ async function getContextoInternoResumen(userId: number, mensaje: string) {
   return lineas.join('\n');
 }
 
+type ControlesPlanesContext = { lines: string[]; total: number };
+
+/** Obtiene riesgos, procesos, controles y planes para el usuario. Usa Redis si está disponible. */
+async function getContextoIA(userId: number, message: string): Promise<{
+  riesgos: string[];
+  procesos: string[];
+  controles: ControlesPlanesContext;
+  planes: ControlesPlanesContext;
+  contextoInterno: string | null;
+}> {
+  const cacheKey = `${IA_CONTEXT_CACHE_PREFIX}${userId}`;
+  const cached = await redisGet<{ riesgos: string[]; procesos: string[]; controles: ControlesPlanesContext; planes: ControlesPlanesContext }>(cacheKey);
+
+  let riesgos: string[];
+  let procesos: string[];
+  let controles: ControlesPlanesContext;
+  let planes: ControlesPlanesContext;
+
+  if (cached) {
+    riesgos = cached.riesgos;
+    procesos = cached.procesos;
+    controles = cached.controles;
+    planes = cached.planes;
+  } else {
+    [riesgos, procesos, controles, planes] = await Promise.all([
+      getRiesgosResumen(userId),
+      getProcesosResumen(userId),
+      getControlesResumen(userId),
+      getPlanesResumen(userId),
+    ]);
+    await redisSet(cacheKey, { riesgos, procesos, controles, planes }, IA_CONTEXT_CACHE_TTL);
+  }
+
+  const contextoInterno = await getContextoInternoResumen(userId, message);
+  return { riesgos, procesos, controles, planes, contextoInterno };
+}
+
 export async function procesarMensajeIA(payload: IAUserMessagePayload): Promise<IAResponsePayload> {
   const t0 = Date.now();
   const { userId, userName, rol, cargo, message, conversationId } = payload;
@@ -199,23 +412,39 @@ export async function procesarMensajeIA(payload: IAUserMessagePayload): Promise<
 
   const shortHistory = (conv.messages || []).slice(-10);
   const numericUserId = Number(userId);
-
   const contextoData: ContextoMensaje[] = [];
+
+  // System message desde el doc del repo (primer mensaje al modelo, como está en la base)
+  contextoData.push({
+    role: 'developer',
+    content: getSystemMessageCora(),
+  });
+
+  const nombreReal = userName?.trim() || 'Usuario';
+  const rolReal = rol?.trim() || 'Usuario';
+  const cargoReal = cargo?.trim() || '';
+  contextoData.push({
+    role: 'developer',
+    content: `USUARIO_ACTUAL:\nNombre: ${nombreReal}\nRol: ${rolReal}\nCargo: ${cargoReal || 'No especificado'}\nUsa siempre estos valores al responder. No escribas {{nombre_usuario}}, {{rol}} ni {{cargo}}.`,
+  });
+
   if (numericUserId > 0) {
-    // Siempre consultamos la base para este usuario, sin depender de palabras clave,
-    // para forzar que la IA tenga contexto real de RIESGOS/PROCESOS/CONTROLES/PLANES/CONTEXTO INTERNO.
-    const [riesgos, procesos, controles, planes, contextoInterno] = await Promise.all([
-      getRiesgosResumen(numericUserId),
-      getProcesosResumen(numericUserId),
-      getControlesResumen(numericUserId),
-      getPlanesResumen(numericUserId),
-      getContextoInternoResumen(numericUserId, message),
-    ]);
+    const { riesgos, procesos, controles, planes, contextoInterno } = await getContextoIA(numericUserId, message);
 
     if (riesgos.length) contextoData.push({ role: 'developer', content: 'RIESGOS:\n' + riesgos.join('\n') });
     if (procesos.length) contextoData.push({ role: 'developer', content: 'PROCESOS:\n' + procesos.join('\n') });
-    if (controles.length) contextoData.push({ role: 'developer', content: 'CONTROLES:\n' + controles.join('\n') });
-    if (planes.length) contextoData.push({ role: 'developer', content: 'PLANES:\n' + planes.join('\n') });
+    if (controles.lines?.length || controles.total > 0) {
+      contextoData.push({
+        role: 'developer',
+        content: `CONTROLES:\nTotal en el sistema: ${controles.total} controles.\n${controles.lines?.join('\n') ?? ''}`,
+      });
+    }
+    if (planes.lines?.length || planes.total > 0) {
+      contextoData.push({
+        role: 'developer',
+        content: `PLANES:\nTotal en el sistema: ${planes.total} planes de acción.\n${planes.lines?.join('\n') ?? ''}`,
+      });
+    }
     if (contextoInterno) contextoData.push({ role: 'developer', content: 'CONTEXTO_INTERNO:\n' + contextoInterno });
   }
 
@@ -296,7 +525,7 @@ async function generarRespuestaConResponses(opts: {
     },
     input,
     max_output_tokens: 600,
-    temperature: 0.6,
+    temperature: 0.5,
   });
 
   // La SDK agrega output_text con todo el texto generado
@@ -344,23 +573,40 @@ export async function procesarMensajeIAStream(
   const shortHistory = (conv.messages || []).slice(-10);
   const numericUserId = Number(userId);
   const contextoData: ContextoMensaje[] = [];
+
+  // System message desde el doc del repo (primer mensaje al modelo, como está en la base)
+  contextoData.push({
+    role: 'developer',
+    content: getSystemMessageCora(),
+  });
+
+  const nombreReal = userName?.trim() || 'Usuario';
+  const rolReal = rol?.trim() || 'Usuario';
+  const cargoReal = cargo?.trim() || '';
+  contextoData.push({
+    role: 'developer',
+    content: `USUARIO_ACTUAL:\nNombre: ${nombreReal}\nRol: ${rolReal}\nCargo: ${cargoReal || 'No especificado'}\nUsa siempre estos valores al responder. No escribas {{nombre_usuario}}, {{rol}} ni {{cargo}}.`,
+  });
+
   if (numericUserId > 0) {
-    const [riesgos, procesos, controles, planes, contextoInterno] = await Promise.all([
-      getRiesgosResumen(numericUserId),
-      getProcesosResumen(numericUserId),
-      getControlesResumen(numericUserId),
-      getPlanesResumen(numericUserId),
-      getContextoInternoResumen(numericUserId, message),
-    ]);
+    const { riesgos, procesos, controles, planes, contextoInterno } = await getContextoIA(numericUserId, message);
 
     if (riesgos.length)
       contextoData.push({ role: 'developer', content: 'RIESGOS:\n' + riesgos.join('\n') });
     if (procesos.length)
       contextoData.push({ role: 'developer', content: 'PROCESOS:\n' + procesos.join('\n') });
-    if (controles.length)
-      contextoData.push({ role: 'developer', content: 'CONTROLES:\n' + controles.join('\n') });
-    if (planes.length)
-      contextoData.push({ role: 'developer', content: 'PLANES:\n' + planes.join('\n') });
+    if (controles.lines?.length || controles.total > 0) {
+      contextoData.push({
+        role: 'developer',
+        content: `CONTROLES:\nTotal en el sistema: ${controles.total} controles.\n${controles.lines?.join('\n') ?? ''}`,
+      });
+    }
+    if (planes.lines?.length || planes.total > 0) {
+      contextoData.push({
+        role: 'developer',
+        content: `PLANES:\nTotal en el sistema: ${planes.total} planes de acción.\n${planes.lines?.join('\n') ?? ''}`,
+      });
+    }
     if (contextoInterno)
       contextoData.push({ role: 'developer', content: 'CONTEXTO_INTERNO:\n' + contextoInterno });
   }
@@ -381,33 +627,35 @@ export async function procesarMensajeIAStream(
       },
     ];
 
-    const stream = await openai.responses.create(
-      {
-        model: 'gpt-4.1-mini',
-        prompt: {
-          ...({
-            id: PROMPT_ID,
-            variables: {
-              user_id: userId,
-              nombre_usuario: userName ?? '',
-              rol: rol ?? '',
-              cargo: cargo ?? '',
-            },
-          } as any),
-        },
-        input,
-        max_output_tokens: 600,
-        temperature: 0.6,
+    // stream: true debe ir en el body (primer argumento), no en options
+    const stream = await openai.responses.create({
+      model: 'gpt-4.1-mini',
+      stream: true,
+      prompt: {
+        ...({
+          id: PROMPT_ID,
+          variables: {
+            user_id: userId,
+            nombre_usuario: userName ?? '',
+            rol: rol ?? '',
+            cargo: cargo ?? '',
+          },
+        } as any),
       },
-      { stream: true },
-    );
+      input,
+      max_output_tokens: 600,
+      temperature: 0.5,
+    });
 
     let fullAnswer = '';
 
-    // Recorremos los eventos semánticos de streaming
-    for await (const event of stream as any) {
-      if (event.type === 'response.output_text.delta') {
-        const delta: string = event.delta;
+    if (stream == null || typeof (stream as any)[Symbol.asyncIterator] !== 'function') {
+      throw new Error('La API no devolvió un stream iterable. Verifica que stream: true esté en el body.');
+    }
+
+    for await (const event of stream as AsyncIterable<{ type?: string; delta?: string }>) {
+      if (event?.type === 'response.output_text.delta') {
+        const delta: string = (event as { delta?: string }).delta ?? '';
         if (delta) {
           fullAnswer += delta;
           onDelta(delta);
