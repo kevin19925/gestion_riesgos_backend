@@ -35,10 +35,15 @@ export const getConfigActiva = async (_req: Request, res: Response) => {
     if (!config) {
       return res.status(404).json({ error: 'No hay configuración activa' });
     }
-    await redisSet(CACHE_KEY_CONFIG_ACTIVA, config, CACHE_TTL_CONFIG_ACTIVA);
+    try {
+      await redisSet(CACHE_KEY_CONFIG_ACTIVA, config, CACHE_TTL_CONFIG_ACTIVA);
+    } catch (_) {
+      // Si Redis falla (ej. serialización), responder igual sin cachear
+    }
     res.json(config);
-  } catch (error) {
-    res.status(500).json({ error: 'Error fetching active config' });
+  } catch (error: any) {
+    console.error('[calificacion-inherente/activa]', error?.message ?? error);
+    res.status(500).json({ error: 'Error al obtener la configuración activa' });
   }
 };
 

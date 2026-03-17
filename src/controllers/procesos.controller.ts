@@ -104,14 +104,17 @@ export const getProcesos = async (req: Request, res: Response) => {
             };
         });
         
-        // OPTIMIZADO: Cachear resultado por 5 minutos
-        await redisSet(cacheKey, procesosConAreaNombre, 300);
-        
+        // OPTIMIZADO: Cachear resultado por 5 minutos (si Redis falla, responder igual)
+        try {
+          await redisSet(cacheKey, procesosConAreaNombre, 300);
+        } catch (_) {
+          // ignorar fallo de cache
+        }
         res.json(procesosConAreaNombre);
     } catch (error: any) {
+        console.error('[procesos/getProcesos]', error?.message ?? error);
         res.status(500).json({ 
-            error: 'Error fetching procesos',
-            details: error?.message || String(error)
+            error: 'Error al cargar procesos',
         });
     }
 };

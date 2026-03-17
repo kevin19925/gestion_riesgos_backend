@@ -27,13 +27,23 @@ import iaRoutes from './ia.routes';
 
 const router = Router();
 
-// Health Check
-router.get('/health', (req, res) => {
-    res.json({ 
-        status: 'ok', 
+// Health Check (incluye prueba de conexión a DB para diagnosticar 500 en producción)
+router.get('/health', async (_req, res) => {
+    let db = false;
+    try {
+        const prisma = (await import('../prisma')).default;
+        await prisma.$queryRaw`SELECT 1`;
+        db = true;
+    } catch (e: any) {
+        console.error('[health] DB check failed:', e?.message ?? e);
+    }
+    const status = db ? 'ok' : 'degraded';
+    res.status(db ? 200 : 503).json({
+        status,
+        db,
         uptime: process.uptime(),
-        version: '2.0.1-debug', // Versión actualizada para confirmar deployment
-        timestamp: new Date().toISOString()
+        version: '2.0.1-debug',
+        timestamp: new Date().toISOString(),
     });
 });
 

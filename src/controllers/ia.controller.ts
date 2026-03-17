@@ -14,10 +14,33 @@ export const postChatIA = async (req: Request, res: Response) => {
     // Obtener el nombre real del usuario y su cargo desde la base de datos
     const dbUser = await prisma.usuario.findUnique({ 
       where: { id: Number(user.userId) }, 
-      select: { nombre: true, cargo: { select: { nombre: true } } } 
+      select: { 
+        nombre: true, 
+        cargo: { select: { nombre: true } },
+        procesosResponsablesMultiples: {
+          select: { modo: true },
+        },
+      } 
     });
     const displayName = dbUser?.nombre || (user.email && user.email.includes('@') ? user.email.split('@')[0] : user.email);
     const cargoNombre = dbUser?.cargo?.nombre || user.role || 'Usuario';
+
+    // Rol "de negocio" para la IA: si es dueño de procesos (director), indicarlo claramente.
+    const tieneProcesosComoDueno =
+      dbUser?.procesosResponsablesMultiples?.some((r: any) => String(r.modo || '').toLowerCase() === 'director') ?? false;
+
+    let iaRol: string;
+    if (tieneProcesosComoDueno) {
+      iaRol = 'Dueño de procesos (director de procesos)';
+    } else {
+      // Mapear códigos técnicos a etiquetas más legibles
+      const codigo = (user.role || '').toLowerCase();
+      if (codigo === 'admin') iaRol = 'Administrador del sistema';
+      else if (codigo === 'gerente') iaRol = 'Gerente';
+      else if (codigo === 'supervisor') iaRol = 'Supervisor';
+      else if (codigo === 'dueño_procesos') iaRol = 'Dueño de procesos';
+      else iaRol = user.role || 'Usuario';
+    }
 
     if (!message || typeof message !== 'string' || !message.trim()) {
       return res.status(400).json({ error: 'El campo message es requerido' });
@@ -26,7 +49,7 @@ export const postChatIA = async (req: Request, res: Response) => {
     const result = await procesarMensajeIA({
       userId: String(user.userId),
       userName: displayName,
-      rol: user.role ?? null,
+      rol: iaRol,
       cargo: cargoNombre,
       message: message.trim(),
       conversationId: conversationId ? String(conversationId) : undefined,
@@ -60,12 +83,33 @@ export const postChatIAStream = async (req: Request, res: Response) => {
 
     const dbUser = await prisma.usuario.findUnique({
       where: { id: Number(user.userId) },
-      select: { nombre: true, cargo: { select: { nombre: true } } },
+      select: {
+        nombre: true,
+        cargo: { select: { nombre: true } },
+        procesosResponsablesMultiples: {
+          select: { modo: true },
+        },
+      },
     });
     const displayName =
       dbUser?.nombre ||
       (user.email && user.email.includes('@') ? user.email.split('@')[0] : user.email);
     const cargoNombre = dbUser?.cargo?.nombre || user.role || 'Usuario';
+
+    const tieneProcesosComoDueno =
+      dbUser?.procesosResponsablesMultiples?.some((r: any) => String(r.modo || '').toLowerCase() === 'director') ?? false;
+
+    let iaRol: string;
+    if (tieneProcesosComoDueno) {
+      iaRol = 'Dueño de procesos (director de procesos)';
+    } else {
+      const codigo = (user.role || '').toLowerCase();
+      if (codigo === 'admin') iaRol = 'Administrador del sistema';
+      else if (codigo === 'gerente') iaRol = 'Gerente';
+      else if (codigo === 'supervisor') iaRol = 'Supervisor';
+      else if (codigo === 'dueño_procesos') iaRol = 'Dueño de procesos';
+      else iaRol = user.role || 'Usuario';
+    }
 
     if (!message || typeof message !== 'string' || !message.trim()) {
       return res.status(400).json({ error: 'El campo message es requerido' });
@@ -93,7 +137,7 @@ export const postChatIAStream = async (req: Request, res: Response) => {
       {
         userId: String(user.userId),
         userName: displayName,
-        rol: user.role ?? null,
+        rol: iaRol,
         cargo: cargoNombre,
         message: message.trim(),
         conversationId: conversationId ? String(conversationId) : undefined,

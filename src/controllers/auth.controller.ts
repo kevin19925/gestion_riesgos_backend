@@ -156,11 +156,15 @@ export const getMe = async (req: Request, res: Response) => {
         if (!user.activo) return res.status(403).json({ error: 'User inactive' });
 
         const payload = buildMePayload(user);
-        await redisSet(cacheKey, payload, CACHE_TTL_ME);
+        try {
+            await redisSet(cacheKey, payload, CACHE_TTL_ME);
+        } catch (_) {
+            // Si Redis falla, responder igual sin cachear
+        }
         res.setHeader('Cache-Control', 'private, max-age=60');
         res.json(payload);
     } catch (error: any) {
-        console.error('[auth/getMe]', error?.message || error);
+        console.error('[auth/getMe]', error?.message ?? error);
         res.status(500).json({ error: 'No se pudo cargar el usuario. Intente de nuevo.' });
     }
 };
