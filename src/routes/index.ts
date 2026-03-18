@@ -74,7 +74,9 @@ router.use('/upload', uploadRoutes);
 router.use('/procesos', procesoResponsablesRoutes);
 router.use('/calificacion-inherente', calificacionInherenteRoutes);
 router.use('/configuracion-residual', configuracionResidualRoutes);
-router.use('/debug', debugRoutes); // TEMPORAL - Eliminar en producción
+if (process.env.NODE_ENV !== 'production') {
+    router.use('/debug', debugRoutes);
+}
 router.use('/audit', auditRoutes); // Sistema de auditoría
 router.use('/ia', iaRoutes); // IA (Responses API + Mongo)
 

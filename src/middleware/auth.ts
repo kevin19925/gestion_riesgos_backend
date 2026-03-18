@@ -50,3 +50,34 @@ export function authMiddleware(options?: { required?: boolean; publicPaths?: str
     next();
   };
 }
+
+type RoleLike = string | undefined;
+
+function normalizeRole(role: RoleLike): string {
+  return String(role || '').trim().toLowerCase();
+}
+
+/**
+ * Authorization middleware by role code from JWT payload.
+ * Keeps compatibility with existing role aliases used by frontend/backend.
+ */
+export function requireRoles(allowedRoles: string[]) {
+  const normalizedAllowed = allowedRoles.map((r) => normalizeRole(r));
+
+  return (req: Request, res: Response, next: NextFunction) => {
+    const user = (req as any).user as { role?: string } | undefined;
+    const role = normalizeRole(user?.role);
+
+    if (!role) {
+      return res.status(401).json({ error: 'No autorizado', message: 'Sesión inválida' });
+    }
+
+    // Superuser aliases that should always pass admin routes.
+    const isSuperAdmin = ['admin', 'gerente_general', 'manager'].includes(role);
+    if (isSuperAdmin || normalizedAllowed.includes(role)) {
+      return next();
+    }
+
+    return res.status(403).json({ error: 'Prohibido', message: 'No tiene permisos para esta operación' });
+  };
+}

@@ -61,7 +61,6 @@ export const getRiesgos = async (req: Request, res: Response) => {
             if (cached) return res.json(cached);
         }
 
-        // Solo campos de evaluación necesarios en listado (no todos los ejes de impacto)
         const include: any = {
             evaluacion: {
                 select: {
@@ -73,6 +72,15 @@ export const getRiesgos = async (req: Request, res: Response) => {
                     impactoGlobal: true,
                     riesgoResidual: true,
                     nivelRiesgoResidual: true,
+                    impactoEconomico: true,
+                    impactoProcesos: true,
+                    impactoLegal: true,
+                    impactoReputacion: true,
+                    impactoPersonas: true,
+                    impactoAmbiental: true,
+                    confidencialidadSGSI: true,
+                    disponibilidadSGSI: true,
+                    integridadSGSI: true,
                 },
             },
             proceso: {
@@ -367,6 +375,18 @@ export const createRiesgo = async (req: Request, res: Response) => {
 export const updateRiesgo = async (req: Request, res: Response) => {
     const id = Number(req.params.id);
     let { evaluacion, causas, priorizacion, ...body } = req.body;
+    console.log(
+        '[RIESGOS][updateRiesgo] Entrada JSON',
+        JSON.stringify(
+            {
+                id,
+                body,
+                evaluacion,
+            },
+            null,
+            2,
+        ),
+    );
     try {
         const data: any = {};
         if (body.procesoId !== undefined) data.procesoId = Number(body.procesoId);
@@ -383,7 +403,29 @@ export const updateRiesgo = async (req: Request, res: Response) => {
         if (body.vicepresidenciaGerenciaAlta !== undefined) data.vicepresidenciaGerenciaAlta = body.vicepresidenciaGerenciaAlta;
         if (body.gerencia !== undefined) data.gerencia = body.gerencia;
 
-        const evaluacionFields = ['riesgoResidual', 'probabilidadResidual', 'impactoResidual', 'nivelRiesgoResidual'];
+        // Campos de EvaluacionRiesgo que se pueden actualizar desde este endpoint.
+        // Incluye impactos inherentes y residuales: el frontend envía siempre
+        // la evaluación completa calculada a partir de los impactos elegidos.
+        const evaluacionFields = [
+            'impactoEconomico',
+            'impactoProcesos',
+            'impactoLegal',
+            'impactoReputacion',
+            'impactoPersonas',
+            'impactoAmbiental',
+            'confidencialidadSGSI',
+            'disponibilidadSGSI',
+            'integridadSGSI',
+            'riesgoInherente',
+            'impactoMaximo',
+            'impactoGlobal',
+            'probabilidad',
+            'nivelRiesgo',
+            'riesgoResidual',
+            'probabilidadResidual',
+            'impactoResidual',
+            'nivelRiesgoResidual',
+        ];
         const evaluacionUpdate: any = { ...evaluacion };
         evaluacionFields.forEach(field => {
             if (body[field] !== undefined) {
@@ -398,9 +440,24 @@ export const updateRiesgo = async (req: Request, res: Response) => {
             where: { id },
             data: { ...data, updatedAt: new Date() }
         });
+        console.log(
+            '[RIESGOS][updateRiesgo] Riesgo tabla principal actualizado',
+            JSON.stringify({ id, data }, null, 2),
+        );
 
         // Actualizar evaluación si se proporciona (crear si no existe)
         if (Object.keys(evaluacionUpdate).length > 0) {
+            console.log(
+                '[RIESGOS][updateRiesgo] evaluacionUpdate JSON',
+                JSON.stringify(
+                    {
+                        id,
+                        evaluacionUpdate,
+                    },
+                    null,
+                    2,
+                ),
+            );
             const existingEval = await prisma.evaluacionRiesgo.findUnique({
                 where: { riesgoId: id }
             });
@@ -422,16 +479,6 @@ export const updateRiesgo = async (req: Request, res: Response) => {
                     }
                 });
             }
-        }
-
-        // Si se actualizaron los impactos, recalcular automáticamente riesgoInherente desde causas
-        const camposImpacto = ['impactoPersonas', 'impactoLegal', 'impactoAmbiental', 'impactoProcesos', 
-                               'impactoReputacion', 'impactoEconomico', 'confidencialidadSGSI', 
-                               'disponibilidadSGSI', 'integridadSGSI'];
-        const seActualizaronImpactos = evaluacionUpdate && camposImpacto.some(campo => evaluacionUpdate[campo] !== undefined);
-        
-        if (seActualizaronImpactos) {
-            await recalcularRiesgoInherenteDesdeCausas(id);
         }
 
         await redisDel(`riesgo:${id}`);

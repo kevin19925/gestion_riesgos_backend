@@ -1,10 +1,12 @@
 import { Request, Response } from 'express';
 import prisma from '../prisma';
 import { signToken } from '../utils/jwt';
+import { hashPassword, looksHashed, verifyPassword } from '../utils/password';
 import { deleteBlobByUrl, isAzureBlobConfigured } from '../utils/azureBlob';
 import { redisGet, redisSet, redisDel } from '../redisClient';
 
 const CACHE_TTL_ME = 60; // 1 minuto para GET /auth/me
+const IS_DEV = process.env.NODE_ENV !== 'production';
 
 export const login = async (req: Request, res: Response) => {
     const { username, password } = req.body as { username?: string; password?: string };
@@ -16,23 +18,24 @@ export const login = async (req: Request, res: Response) => {
         const normalizedUsername = String(username).trim();
         const normalizedPassword = String(password).trim();
 
-        console.log('[auth/login] intento de login', {
-            username: normalizedUsername,
-            // Nunca loguear la contraseña
-        });
+        if (IS_DEV) {
+            console.log('[auth/login] intento de login', {
+                username: normalizedUsername,
+            });
+        }
 
         const user = await prisma.usuario.findFirst({
             where: {
                 OR: [
                     { email: normalizedUsername },
                     { email: `${normalizedUsername}@comware.com.co` }
-                ],
-                password: normalizedPassword
+                ]
             },
             select: {
                 id: true,
                 nombre: true,
                 email: true,
+                password: true,
                 activo: true,
                 roleId: true,
                 cargoId: true,
@@ -42,18 +45,30 @@ export const login = async (req: Request, res: Response) => {
             }
         });
 
-        if (!user) {
-            console.warn('[auth/login] usuario no encontrado o contraseña incorrecta', {
-                username: normalizedUsername,
-            });
+        if (!user || !(await verifyPassword(normalizedPassword, (user as any).password))) {
+            if (IS_DEV) {
+                console.warn('[auth/login] usuario no encontrado o contraseña incorrecta', {
+                    username: normalizedUsername,
+                });
+            }
             return res.status(401).json({ success: false, error: 'Usuario o contraseña incorrectos' });
         }
 
-        if (!user.activo) {
-            console.warn('[auth/login] usuario inactivo', {
-                userId: user.id,
-                email: user.email,
+        if (!looksHashed((user as any).password)) {
+            const upgradedPassword = await hashPassword(normalizedPassword);
+            await prisma.usuario.update({
+                where: { id: user.id },
+                data: { password: upgradedPassword }
             });
+        }
+
+        if (!user.activo) {
+            if (IS_DEV) {
+                console.warn('[auth/login] usuario inactivo', {
+                    userId: user.id,
+                    email: user.email,
+                });
+            }
             return res.status(401).json({ success: false, error: 'Usuario inactivo' });
         }
 
@@ -63,14 +78,16 @@ export const login = async (req: Request, res: Response) => {
         const puedeVisualizar = permisos.visualizar !== false;
         const puedeEditar = permisos.editar === true;
 
-        console.log('[auth/login] login exitoso', {
-            userId: user.id,
-            email: user.email,
-            roleCodigo,
-            roleAmbito,
-            puedeVisualizar,
-            puedeEditar,
-        });
+        if (IS_DEV) {
+            console.log('[auth/login] login exitoso', {
+                userId: user.id,
+                email: user.email,
+                roleCodigo,
+                roleAmbito,
+                puedeVisualizar,
+                puedeEditar,
+            });
+        }
 
         const token = signToken({
             userId: user.id,
@@ -124,8 +141,8 @@ function buildMePayload(user: any): object {
 }
 
 export const getMe = async (req: Request, res: Response) => {
-    const id = (req as any).user?.userId ?? req.query.id;
-    if (!id) return res.status(400).json({ error: 'User ID or token required' });
+    const id = (req as any).user?.userId;
+    if (!id) return res.status(401).json({ error: 'No autorizado' });
 
     const userId = Number(id);
     if (isNaN(userId)) return res.status(400).json({ error: 'Invalid user ID' });
@@ -190,10 +207,10 @@ export const updateMe = async (req: Request, res: Response) => {
         }
 
         if (passwordNueva !== undefined && passwordNueva !== '') {
-            if (!passwordActual || user.password !== passwordActual) {
+            if (!passwordActual || !(await verifyPassword(String(passwordActual), user.password))) {
                 return res.status(400).json({ error: 'La contraseña actual no es correcta' });
             }
-            updateData.password = passwordNueva;
+            updateData.password = await hashPassword(String(passwordNueva));
         }
 
         if (fotoPerfil !== undefined) {

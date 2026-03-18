@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import prisma from '../prisma';
 import { getDeleteErrorMessage } from '../utils/prismaErrors';
+import { hashPassword } from '../utils/password';
 
 export const getUsuarios = async (req: Request, res: Response) => {
     try {
@@ -87,11 +88,12 @@ export const createUsuario = async (req: Request, res: Response) => {
             }
         }
 
-        const plainPassword = password || 'comware123';
+        const plainPassword = String(password || 'comware123');
+        const hashedPassword = await hashPassword(plainPassword);
 
         await prisma.$executeRaw`
             INSERT INTO "Usuario" (nombre, email, password, role, "roleId", "cargoId", activo, "createdAt", "updatedAt")
-            VALUES (${nombre}, ${emailStr}, ${plainPassword}, ${roleCodigo}, ${Number(roleId)}, ${cargoId ? Number(cargoId) : null}, ${activo ?? true}, NOW(), NOW())
+            VALUES (${nombre}, ${emailStr}, ${hashedPassword}, ${roleCodigo}, ${Number(roleId)}, ${cargoId ? Number(cargoId) : null}, ${activo ?? true}, NOW(), NOW())
         `;
 
         const user = await prisma.usuario.findFirst({
@@ -133,7 +135,7 @@ export const updateUsuario = async (req: Request, res: Response) => {
             }
             updateData.email = emailStr;
         }
-        if (password !== undefined) updateData.password = password;
+        if (password !== undefined) updateData.password = await hashPassword(String(password));
         if (roleId !== undefined) updateData.roleId = Number(roleId);
         if (cargoId !== undefined) updateData.cargoId = cargoId ? Number(cargoId) : null;
         if (activo !== undefined) updateData.activo = activo;
