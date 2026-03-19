@@ -208,7 +208,22 @@ export const getProcesoById = async (req: Request, res: Response) => {
                     take: 100
                 },
                 dofaItems: { select: { id: true, tipo: true, descripcion: true } },
-                normatividades: { select: { id: true, numero: true, nombre: true, estado: true, regulador: true, cumplimiento: true } },
+                normatividades: { 
+                    select: { 
+                        id: true, 
+                        numero: true, 
+                        nombre: true, 
+                        estado: true, 
+                        regulador: true, 
+                        sanciones: true,
+                        plazoImplementacion: true,
+                        cumplimiento: true,
+                        detalleIncumplimiento: true,
+                        riesgoIdentificado: true,
+                        clasificacion: true,
+                        comentarios: true
+                    } 
+                },
                 contextos: { select: { id: true, tipo: true, descripcion: true } },
                 contextoItems: { select: { id: true, tipo: true, signo: true, descripcion: true, enviarADofa: true, dofaDimension: true } },
                 participantes: {
