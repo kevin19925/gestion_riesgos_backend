@@ -79,7 +79,9 @@ export const postChatIAStream = async (req: Request, res: Response) => {
       return res.status(401).json({ error: 'No autorizado', message: 'Usuario no autenticado' });
     }
 
-    const { message, conversationId } = req.body || {};
+    const { message, conversationId, screenContext } = req.body || {}; // NUEVO: screenContext
+
+    console.log('[IA Controller] screenContext recibido:', JSON.stringify(screenContext, null, 2)); // DEBUG
 
     const dbUser = await prisma.usuario.findUnique({
       where: { id: Number(user.userId) },
@@ -141,6 +143,7 @@ export const postChatIAStream = async (req: Request, res: Response) => {
         cargo: cargoNombre,
         message: message.trim(),
         conversationId: conversationId ? String(conversationId) : undefined,
+        screenContext, // NUEVO: Pasar contexto de pantalla
       },
       (chunk) => {
         sendEvent(null, { delta: chunk });
