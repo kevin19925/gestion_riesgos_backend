@@ -9,9 +9,14 @@ dotenv.config();
 const url = (process.env.DATABASE_URL || '').replace(/^"|"$/g, '');
 const pool = new Pool({
     connectionString: url,
-    max: 30,                          // Aumentado a 30 conexiones
+    max: 20,                          // Reducido a 20 para evitar saturación
+    min: 2,                           // Mantener 2 conexiones mínimas activas
     idleTimeoutMillis: 30000,         // 30s para cerrar conexiones inactivas
-    connectionTimeoutMillis: 10000,   // Aumentado a 10s para evitar fallos por latencia de Azure
+    connectionTimeoutMillis: 30000,   // Aumentado a 30s para Azure (alta latencia)
+    statement_timeout: 60000,         // 60s timeout para queries
+    query_timeout: 60000,             // 60s timeout para queries
+    keepAlive: true,                  // Mantener conexiones vivas
+    keepAliveInitialDelayMillis: 10000, // Delay inicial para keep-alive
     ssl: {
         rejectUnauthorized: false     // Obligatorio para Azure
     }
