@@ -49,7 +49,7 @@ export function auditMiddleware() {
         select: {
           nombre: true,
           email: true,
-          role: {
+          roleRelacion: {
             select: { codigo: true },
           },
         },
@@ -58,7 +58,7 @@ export function auditMiddleware() {
       if (usuario) {
         usuarioNombre = usuario.nombre;
         usuarioEmail = usuario.email;
-        usuarioRole = usuario.role?.codigo || usuarioRole;
+        usuarioRole = usuario.roleRelacion?.codigo || usuarioRole;
       }
     } catch (error) {
       console.error('Error obteniendo datos del usuario para auditoría:', error);

@@ -21,7 +21,7 @@ export const getResponsablesByProceso = async (req: Request, res: Response) => {
                         id: true,
                         nombre: true,
                         email: true,
-                        role: true,
+                        roleRelacion: true,
                         cargo: true
                     }
                 }
@@ -71,7 +71,7 @@ export const addResponsableToProceso = async (req: Request, res: Response) => {
         // Verificar que el usuario existe
         const usuario = await prisma.usuario.findUnique({
             where: { id: Number(usuarioId) },
-            include: { role: true }
+            include: { roleRelacion: true }
         });
         
         if (!usuario) {
@@ -83,7 +83,7 @@ export const addResponsableToProceso = async (req: Request, res: Response) => {
             where: { procesoId, usuarioId: Number(usuarioId), modo },
             include: {
                 usuario: {
-                    select: { id: true, nombre: true, email: true, role: true, cargo: true }
+                    select: { id: true, nombre: true, email: true, roleRelacion: true, cargo: true }
                 }
             }
         });
@@ -96,7 +96,7 @@ export const addResponsableToProceso = async (req: Request, res: Response) => {
                 },
                 include: {
                     usuario: {
-                        select: { id: true, nombre: true, email: true, role: true, cargo: true }
+                        select: { id: true, nombre: true, email: true, roleRelacion: true, cargo: true }
                     }
                 }
             });
@@ -189,7 +189,7 @@ export const updateResponsablesProceso = async (req: Request, res: Response) => 
         
         const usuarios = await prisma.usuario.findMany({
             where: { id: { in: usuariosIdsUnicos } },
-            include: { role: true }
+            include: { roleRelacion: true }
         });
         
         // Validar que todos los IDs únicos existen
@@ -255,7 +255,7 @@ export const updateResponsablesProceso = async (req: Request, res: Response) => 
                         id: true,
                         nombre: true,
                         email: true,
-                        role: true,
+                        roleRelacion: true,
                         cargo: true
                     }
                 }

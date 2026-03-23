@@ -99,8 +99,11 @@ export const getRiesgos = async (req: Request, res: Response) => {
         if (includeCausasFlag) {
             include.causas = {
                 take: 10, // Limitar causas a 10 por riesgo para máximo rendimiento
-                orderBy: { id: 'asc' } // Ordenar para consistencia
-                // Nota: No usar select dentro de include en Prisma
+                orderBy: { id: 'asc' }, // Ordenar para consistencia
+                include: {
+                    controles: true, // Incluir controles de la causa
+                    planesAccion: true // Incluir planes de acción de la causa
+                }
             };
         }
         
@@ -127,7 +130,18 @@ export const getRiesgos = async (req: Request, res: Response) => {
             tipoRiesgo: r.tipologiaTipo1Relacion?.nombre ?? null,
             subtipoRiesgo: r.tipologiaTipo2Relacion?.nombre ?? null,
             tipoRiesgoId: r.tipologiaTipo1Id ?? null,
-            subtipoRiesgoId: r.tipologiaTipo2Id ?? null
+            subtipoRiesgoId: r.tipologiaTipo2Id ?? null,
+            // Calcular tipoGestion dinámicamente si no está presente
+            causas: (r.causas || []).map((c: any) => ({
+                ...c,
+                tipoGestion: c.tipoGestion || (
+                    (c.controles?.length > 0 && c.planesAccion?.length > 0) ? 'AMBOS' :
+                    c.controles?.length > 0 ? 'CONTROL' :
+                    c.planesAccion?.length > 0 ? 'PLAN' :
+                    c.puntajeTotal !== undefined ? 'CONTROL' : // Fallback: si tiene puntajeTotal, es un control
+                    null
+                )
+            }))
         }));
 
         const payload = {
@@ -180,8 +194,8 @@ export const getRiesgoById = async (req: Request, res: Response) => {
                 tipologiaTipo1Id: true,
                 tipologiaTipo2Id: true,
                 objetivoId: true,
-                tipologiaTipo3: true,
-                tipologiaTipo4: true,
+                tipologiaTipo3Id: true,
+                tipologiaTipo4Id: true,
                 origen: true,
                 vicepresidenciaGerenciaAlta: true,
                 gerencia: true,
@@ -190,6 +204,8 @@ export const getRiesgoById = async (req: Request, res: Response) => {
                 evaluacion: true,
                 tipologiaTipo1Relacion: { select: { id: true, nombre: true } },
                 tipologiaTipo2Relacion: { select: { id: true, nombre: true } },
+                tipologiaTipo3Relacion: { select: { id: true, nombre: true, nivel: true } },
+                tipologiaTipo4Relacion: { select: { id: true, nombre: true, nivel: true } },
                 causas: {
                     take: 20,
                     orderBy: { id: 'desc' },
@@ -199,9 +215,7 @@ export const getRiesgoById = async (req: Request, res: Response) => {
                         descripcion: true,
                         fuenteCausa: true,
                         frecuencia: true,
-                        seleccionada: true,
-                        tipoGestion: true,
-                        gestion: true
+                        seleccionada: true
                     }
                 },
                 priorizacion: {
@@ -295,8 +309,8 @@ export const createRiesgo = async (req: Request, res: Response) => {
             tipologiaTipo1Id: riesgoData.tipoRiesgoId != null ? Number(riesgoData.tipoRiesgoId) : null,
             tipologiaTipo2Id: riesgoData.subtipoRiesgoId != null ? Number(riesgoData.subtipoRiesgoId) : null,
             objetivoId: riesgoData.objetivoId != null ? Number(riesgoData.objetivoId) : null,
-            tipologiaTipo3: riesgoData.tipologiaTipo3 != null && riesgoData.tipologiaTipo3 !== '' ? String(riesgoData.tipologiaTipo3) : null,
-            tipologiaTipo4: riesgoData.tipologiaTipo4 != null && riesgoData.tipologiaTipo4 !== '' ? String(riesgoData.tipologiaTipo4) : null,
+            tipologiaTipo3Id: riesgoData.tipologiaTipo3Id != null ? Number(riesgoData.tipologiaTipo3Id) : null,
+            tipologiaTipo4Id: riesgoData.tipologiaTipo4Id != null ? Number(riesgoData.tipologiaTipo4Id) : null,
             origen: riesgoData.origen ?? null,
             vicepresidenciaGerenciaAlta: riesgoData.vicepresidenciaGerenciaAlta ?? null,
             gerencia: riesgoData.gerencia ?? null
@@ -397,8 +411,8 @@ export const updateRiesgo = async (req: Request, res: Response) => {
         if (body.tipoRiesgoId !== undefined || body.tipologiaTipo1Id !== undefined) data.tipologiaTipo1Id = (body.tipologiaTipo1Id ?? body.tipoRiesgoId) != null ? Number(body.tipologiaTipo1Id ?? body.tipoRiesgoId) : null;
         if (body.subtipoRiesgoId !== undefined || body.tipologiaTipo2Id !== undefined) data.tipologiaTipo2Id = (body.tipologiaTipo2Id ?? body.subtipoRiesgoId) != null ? Number(body.tipologiaTipo2Id ?? body.subtipoRiesgoId) : null;
         if (body.objetivoId !== undefined) data.objetivoId = body.objetivoId != null ? Number(body.objetivoId) : null;
-        if (body.tipologiaTipo3 !== undefined) data.tipologiaTipo3 = body.tipologiaTipo3 == null || body.tipologiaTipo3 === '' ? null : String(body.tipologiaTipo3);
-        if (body.tipologiaTipo4 !== undefined) data.tipologiaTipo4 = body.tipologiaTipo4 == null || body.tipologiaTipo4 === '' ? null : String(body.tipologiaTipo4);
+        if (body.tipologiaTipo3Id !== undefined) data.tipologiaTipo3Id = body.tipologiaTipo3Id != null ? Number(body.tipologiaTipo3Id) : null;
+        if (body.tipologiaTipo4Id !== undefined) data.tipologiaTipo4Id = body.tipologiaTipo4Id != null ? Number(body.tipologiaTipo4Id) : null;
         if (body.origen !== undefined) data.origen = body.origen;
         if (body.vicepresidenciaGerenciaAlta !== undefined) data.vicepresidenciaGerenciaAlta = body.vicepresidenciaGerenciaAlta;
         if (body.gerencia !== undefined) data.gerencia = body.gerencia;
@@ -643,13 +657,12 @@ export const getPuntosMapa = async (req: Request, res: Response) => {
             },
         });
 
-        // Riesgos que tienen al menos una causa con control (CONTROL o AMBOS): residual se calcula; el resto residual = inherente
+        // Riesgos que tienen al menos una causa con control: residual se calcula; el resto residual = inherente
         const riesgoIdsConControl = new Set<number>();
         try {
             const causasConControl = await prisma.causaRiesgo.findMany({
                 where: {
-                    tipoGestion: { in: ['CONTROL', 'AMBOS'] },
-                    gestion: { not: null },
+                    controles: { some: {} }, // Causas que tienen al menos un control
                     riesgoId: { in: riesgos.map(r => r.id) }
                 },
                 select: { riesgoId: true }
@@ -900,8 +913,6 @@ export const getCausas = async (req: Request, res: Response) => {
                 id: true,
                 descripcion: true,
                 riesgoId: true,
-                tipoGestion: true,
-                gestion: true,
             },
         });
         res.json(causas);
@@ -1100,7 +1111,7 @@ export async function recalcularRiesgoInherenteDesdeCausas(riesgoId: number): Pr
 
 export const createCausa = async (req: Request, res: Response) => {
     try {
-        const { riesgoId, descripcion, fuenteCausa, frecuencia, seleccionada, tipoGestion, gestion } = req.body;
+        const { riesgoId, descripcion, fuenteCausa, frecuencia, seleccionada } = req.body;
         const riesgoIdNum = Number(riesgoId);
 
         if (!riesgoId || (riesgoIdNum !== 0 && !riesgoIdNum)) {
@@ -1126,8 +1137,6 @@ export const createCausa = async (req: Request, res: Response) => {
             fuenteCausa: string | null;
             frecuencia: string | null;
             seleccionada: boolean;
-            tipoGestion?: string | null;
-            gestion?: object | null;
         } = {
             riesgoId: riesgoIdNum,
             descripcion: descripcionTrim,
@@ -1135,8 +1144,6 @@ export const createCausa = async (req: Request, res: Response) => {
             frecuencia: frecuencia != null && String(frecuencia).trim() !== '' ? String(frecuencia) : null,
             seleccionada: seleccionada !== undefined ? Boolean(seleccionada) : true,
         };
-        if (tipoGestion != null && String(tipoGestion).trim() !== '') dataCausa.tipoGestion = String(tipoGestion);
-        if (gestion != null && typeof gestion === 'object') dataCausa.gestion = gestion;
 
         let causa: any;
         try {
@@ -1171,15 +1178,6 @@ export const createCausa = async (req: Request, res: Response) => {
             console.error('[createCausa] recalcularRiesgoInherenteDesdeCausas', err?.message || err);
         });
 
-        // Si la causa tiene control (CONTROL o AMBOS), recalcular calificación residual y esperar para devolver datos ya guardados en BD
-        if (dataCausa.tipoGestion === 'CONTROL' || dataCausa.tipoGestion === 'AMBOS') {
-            await recalcularResidualPorRiesgo(riesgoIdNum).catch((err) => {
-                console.error('[createCausa] recalcularResidualPorRiesgo', err?.message || err);
-            });
-            // Re-fetch la causa para devolver gestion con frecuenciaResidual/impactoResidual ya calculados
-            causa = await prisma.causaRiesgo.findUnique({ where: { id: causa.id } }) ?? causa;
-        }
-
         // Invalidar caché del listado de riesgos del proceso para que el frontend vea las causas nuevas
         const riesgo = await prisma.riesgo.findUnique({
             where: { id: riesgoIdNum },
@@ -1202,19 +1200,15 @@ export const createCausa = async (req: Request, res: Response) => {
 };
 
 /**
- * Actualiza una causa. Soporta:
- * - tipoGestion: 'CONTROL' | 'PLAN' | 'AMBOS' (o null para eliminar clasificación)
- * - gestion: objeto JSON con datos de control y/o plan (cuando AMBOS, incluye ambos conjuntos de campos)
+ * Actualiza una causa. Soporta campos básicos de la causa.
+ * NOTA: Los campos tipoGestion y gestion fueron eliminados en la normalización.
+ * Ahora los controles y planes se gestionan en tablas separadas (ControlRiesgo, PlanAccion).
  */
 export const updateCausa = async (req: Request, res: Response) => {
     const id = Number(req.params.id);
     try {
-        const { tipoGestion, gestion, descripcion, fuenteCausa, frecuencia } = req.body;
+        const { descripcion, fuenteCausa, frecuencia } = req.body;
         const updateData: any = {};
-        
-        // Campos de gestión: tipoGestion acepta CONTROL, PLAN, AMBOS o null
-        if (tipoGestion !== undefined) updateData.tipoGestion = tipoGestion;
-        if (gestion !== undefined) updateData.gestion = gestion;
         
         // Campos básicos de causa
         if (descripcion !== undefined) updateData.descripcion = descripcion;
@@ -1231,21 +1225,13 @@ export const updateCausa = async (req: Request, res: Response) => {
             await recalcularRiesgoInherenteDesdeCausas(updated.riesgoId);
         }
 
-        // Recalcular calificación residual cuando se guarda/edita un control (usa parámetros del admin)
-        let resultado: typeof updated = updated;
-        if (tipoGestion !== undefined || gestion !== undefined) {
-            await recalcularResidualPorRiesgo(updated.riesgoId).catch(() => {});
-            // Devolver la causa con gestion ya recalculado (frecuenciaResidual, impactoResidual, etc.)
-            resultado = await prisma.causaRiesgo.findUnique({ where: { id: updated.id } }) ?? updated;
-        }
-
         const riesgo = await prisma.riesgo.findUnique({
             where: { id: updated.riesgoId },
             select: { procesoId: true }
         });
         if (riesgo?.procesoId) await invalidarCacheRiesgosProceso(riesgo.procesoId);
 
-        res.json(resultado);
+        res.json(updated);
     } catch (error) {
         res.status(500).json({ error: 'Error updating causa' });
     }

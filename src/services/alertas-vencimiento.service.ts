@@ -15,6 +15,7 @@ interface AlertaGenerada {
 /**
  * Genera alertas de vencimiento para todos los planes activos
  * Se ejecuta diariamente a las 08:00 AM
+ * REFACTORIZADO: Trabaja con tabla PlanAccion normalizada
  */
 export async function generarAlertasVencimiento(): Promise<{
   generadas: number;
@@ -28,20 +29,25 @@ export async function generarAlertasVencimiento(): Promise<{
   try {
     detalles.push(`[${new Date().toISOString()}] Iniciando generación de alertas...`);
 
-    // 1. Buscar todas las causas con planes activos
-    const causasConPlanes = await prisma.causaRiesgo.findMany({
+    // 1. Buscar todos los planes activos con causaRiesgoId
+    const planesActivos = await prisma.planAccion.findMany({
       where: {
-        tipoGestion: { in: ['PLAN', 'AMBOS'] },
-        gestion: { not: null }
+        causaRiesgoId: { not: null },
+        estado: { notIn: ['COMPLETADO', 'CANCELADO', 'completado', 'cancelado'] },
+        fechaFin: { not: null }
       },
       include: {
-        riesgo: {
+        causaRiesgo: {
           include: {
-            proceso: {
+            riesgo: {
               include: {
-                responsables: {
+                proceso: {
                   include: {
-                    usuario: true
+                    responsables: {
+                      include: {
+                        usuario: true
+                      }
+                    }
                   }
                 }
               }
@@ -51,31 +57,23 @@ export async function generarAlertasVencimiento(): Promise<{
       }
     });
 
-    detalles.push(`Encontradas ${causasConPlanes.length} causas con planes`);
+    detalles.push(`Encontrados ${planesActivos.length} planes activos`);
 
     const hoy = new Date();
     hoy.setHours(0, 0, 0, 0); // Normalizar a medianoche
 
-    // 2. Procesar cada causa
-    for (const causa of causasConPlanes) {
+    // 2. Procesar cada plan
+    for (const plan of planesActivos) {
       try {
-        const gestion = causa.gestion as any;
-
-        // Validar que tiene datos del plan
-        if (!gestion || !gestion.planFechaEstimada) {
-          continue;
-        }
-
-        // Validar que el plan no está completado o cancelado
-        const estado = gestion.planEstado || 'pendiente';
-        if (estado === 'completado' || estado === 'cancelado') {
+        // Validar que tiene fecha de fin
+        if (!plan.fechaFin || !plan.causaRiesgoId) {
           continue;
         }
 
         // Calcular días restantes
-        const fechaEstimada = new Date(gestion.planFechaEstimada);
-        fechaEstimada.setHours(0, 0, 0, 0);
-        const diasRestantes = Math.ceil((fechaEstimada.getTime() - hoy.getTime()) / (1000 * 60 * 60 * 24));
+        const fechaFin = new Date(plan.fechaFin);
+        fechaFin.setHours(0, 0, 0, 0);
+        const diasRestantes = Math.ceil((fechaFin.getTime() - hoy.getTime()) / (1000 * 60 * 60 * 24));
 
         // Determinar si necesita alerta
         let tipoAlerta: 'proximo' | 'vencido' | null = null;
@@ -94,8 +92,8 @@ export async function generarAlertasVencimiento(): Promise<{
         // 3. Obtener usuarios a notificar (responsables del proceso)
         const usuariosANotificar: number[] = [];
 
-        if (causa.riesgo?.proceso?.responsables) {
-          for (const responsable of causa.riesgo.proceso.responsables) {
+        if (plan.causaRiesgo?.riesgo?.proceso?.responsables) {
+          for (const responsable of plan.causaRiesgo.riesgo.proceso.responsables) {
             if (responsable.usuario?.id) {
               usuariosANotificar.push(responsable.usuario.id);
             }
@@ -106,7 +104,7 @@ export async function generarAlertasVencimiento(): Promise<{
         if (usuariosANotificar.length === 0) {
           const supervisores = await prisma.usuario.findMany({
             where: {
-              role: {
+              roleRelacion: {
                 codigo: { in: ['supervisor', 'gerente'] }
               },
               activo: true
@@ -122,7 +120,7 @@ export async function generarAlertasVencimiento(): Promise<{
             // Verificar si ya existe una alerta similar reciente (últimas 24 horas)
             const alertaExistente = await prisma.alertaVencimiento.findFirst({
               where: {
-                causaRiesgoId: causa.id,
+                causaRiesgoId: plan.causaRiesgoId,
                 usuarioId,
                 tipo: tipoAlerta,
                 fechaGeneracion: {
@@ -143,7 +141,7 @@ export async function generarAlertasVencimiento(): Promise<{
             // Crear nueva alerta
             await prisma.alertaVencimiento.create({
               data: {
-                causaRiesgoId: causa.id,
+                causaRiesgoId: plan.causaRiesgoId,
                 usuarioId,
                 tipo: tipoAlerta,
                 diasRestantes,
@@ -154,12 +152,12 @@ export async function generarAlertasVencimiento(): Promise<{
             generadas++;
           } catch (error) {
             errores++;
-            detalles.push(`Error al crear alerta para usuario ${usuarioId}, causa ${causa.id}: ${error}`);
+            detalles.push(`Error al crear alerta para usuario ${usuarioId}, plan ${plan.id}: ${error}`);
           }
         }
       } catch (error) {
         errores++;
-        detalles.push(`Error al procesar causa ${causa.id}: ${error}`);
+        detalles.push(`Error al procesar plan ${plan.id}: ${error}`);
       }
     }
 
@@ -188,19 +186,29 @@ export async function generarAlertasVencimiento(): Promise<{
 
 /**
  * Genera alertas para un plan específico (uso manual o por evento)
+ * REFACTORIZADO: Trabaja con tabla PlanAccion normalizada
  */
 export async function generarAlertaParaPlan(causaRiesgoId: number): Promise<boolean> {
   try {
-    const causa = await prisma.causaRiesgo.findUnique({
-      where: { id: causaRiesgoId },
+    // Buscar el plan asociado a esta causa
+    const plan = await prisma.planAccion.findFirst({
+      where: {
+        causaRiesgoId,
+        estado: { notIn: ['COMPLETADO', 'CANCELADO', 'completado', 'cancelado'] },
+        fechaFin: { not: null }
+      },
       include: {
-        riesgo: {
+        causaRiesgo: {
           include: {
-            proceso: {
+            riesgo: {
               include: {
-                responsables: {
+                proceso: {
                   include: {
-                    usuario: true
+                    responsables: {
+                      include: {
+                        usuario: true
+                      }
+                    }
                   }
                 }
               }
@@ -210,25 +218,15 @@ export async function generarAlertaParaPlan(causaRiesgoId: number): Promise<bool
       }
     });
 
-    if (!causa) {
-      return false;
-    }
-
-    const gestion = causa.gestion as any;
-    if (!gestion || !gestion.planFechaEstimada) {
-      return false;
-    }
-
-    const estado = gestion.planEstado || 'pendiente';
-    if (estado === 'completado' || estado === 'cancelado') {
+    if (!plan || !plan.fechaFin) {
       return false;
     }
 
     const hoy = new Date();
     hoy.setHours(0, 0, 0, 0);
-    const fechaEstimada = new Date(gestion.planFechaEstimada);
-    fechaEstimada.setHours(0, 0, 0, 0);
-    const diasRestantes = Math.ceil((fechaEstimada.getTime() - hoy.getTime()) / (1000 * 60 * 60 * 24));
+    const fechaFin = new Date(plan.fechaFin);
+    fechaFin.setHours(0, 0, 0, 0);
+    const diasRestantes = Math.ceil((fechaFin.getTime() - hoy.getTime()) / (1000 * 60 * 60 * 24));
 
     let tipoAlerta: 'proximo' | 'vencido' | null = null;
     if (diasRestantes < 0) {
@@ -243,8 +241,8 @@ export async function generarAlertaParaPlan(causaRiesgoId: number): Promise<bool
 
     // Obtener usuarios a notificar
     const usuariosANotificar: number[] = [];
-    if (causa.riesgo?.proceso?.responsables) {
-      for (const responsable of causa.riesgo.proceso.responsables) {
+    if (plan.causaRiesgo?.riesgo?.proceso?.responsables) {
+      for (const responsable of plan.causaRiesgo.riesgo.proceso.responsables) {
         if (responsable.usuario?.id) {
           usuariosANotificar.push(responsable.usuario.id);
         }
@@ -255,7 +253,7 @@ export async function generarAlertaParaPlan(causaRiesgoId: number): Promise<bool
     for (const usuarioId of usuariosANotificar) {
       await prisma.alertaVencimiento.create({
         data: {
-          causaRiesgoId: causa.id,
+          causaRiesgoId,
           usuarioId,
           tipo: tipoAlerta,
           diasRestantes,

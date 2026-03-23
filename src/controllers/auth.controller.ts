@@ -40,7 +40,7 @@ export const login = async (req: Request, res: Response) => {
                 roleId: true,
                 cargoId: true,
                 fotoPerfil: true,
-                role: { select: { codigo: true, ambito: true, permisos: true } },
+                roleRelacion: { select: { codigo: true, ambito: true, permisos: true } },
                 cargo: { select: { nombre: true } }
             }
         });
@@ -72,9 +72,9 @@ export const login = async (req: Request, res: Response) => {
             return res.status(401).json({ success: false, error: 'Usuario inactivo' });
         }
 
-        const roleCodigo = user.role?.codigo || 'usuario';
-        const roleAmbito = (user.role as { ambito?: string })?.ambito || 'OPERATIVO';
-        const permisos = (user.role as { permisos?: { visualizar?: boolean; editar?: boolean } })?.permisos || {};
+        const roleCodigo = user.roleRelacion?.codigo || 'usuario';
+        const roleAmbito = (user.roleRelacion as { ambito?: string })?.ambito || 'OPERATIVO';
+        const permisos = (user.roleRelacion as { permisos?: { visualizar?: boolean; editar?: boolean } })?.permisos || {};
         const puedeVisualizar = permisos.visualizar !== false;
         const puedeEditar = permisos.editar === true;
 
@@ -121,9 +121,9 @@ export const login = async (req: Request, res: Response) => {
 };
 
 function buildMePayload(user: any): object {
-    const roleCodigo = user.role?.codigo || 'usuario';
-    const roleAmbito = (user.role as { ambito?: string })?.ambito || 'OPERATIVO';
-    const permisos = (user.role as { permisos?: { visualizar?: boolean; editar?: boolean } })?.permisos || {};
+    const roleCodigo = user.roleRelacion?.codigo || 'usuario';
+    const roleAmbito = (user.roleRelacion as { ambito?: string })?.ambito || 'OPERATIVO';
+    const permisos = (user.roleRelacion as { permisos?: { visualizar?: boolean; editar?: boolean } })?.permisos || {};
     return {
         id: user.id,
         username: user.email.split('@')[0],
@@ -165,7 +165,7 @@ export const getMe = async (req: Request, res: Response) => {
                 roleId: true,
                 cargoId: true,
                 fotoPerfil: true,
-                role: { select: { codigo: true, ambito: true, permisos: true } },
+                roleRelacion: { select: { codigo: true, ambito: true, permisos: true } },
                 cargo: { select: { nombre: true } }
             }
         });
@@ -195,7 +195,7 @@ export const updateMe = async (req: Request, res: Response) => {
     try {
         const user = await prisma.usuario.findUnique({
             where: { id: Number(userId) },
-            include: { cargo: true, role: true }
+            include: { cargo: true, roleRelacion: true }
         });
         if (!user) return res.status(404).json({ error: 'Usuario no encontrado' });
         if (!user.activo) return res.status(403).json({ error: 'Usuario inactivo' });
@@ -241,7 +241,7 @@ export const updateMe = async (req: Request, res: Response) => {
                 email: true,
                 fotoPerfil: true,
                 cargo: { select: { nombre: true } },
-                role: { select: { codigo: true, ambito: true, permisos: true } }
+                roleRelacion: { select: { codigo: true, ambito: true, permisos: true } }
             }
         });
 

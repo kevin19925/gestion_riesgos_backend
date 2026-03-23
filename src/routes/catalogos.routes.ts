@@ -11,6 +11,15 @@ import {
     getSubtipos, createSubtipo, updateSubtipo, deleteSubtipo
 } from '../controllers/catalogos.controller';
 
+import {
+    obtenerTipologiasExtendidas,
+    obtenerTipologiaExtendidaPorId,
+    crearTipologiaExtendida,
+    actualizarTipologiaExtendida,
+    eliminarTipologiaExtendida,
+    obtenerTipologiasPorSubtipo
+} from '../controllers/tipologias-extendidas.controller';
+
 const router = Router();
 
 router.get('/listas-valores', getListasValores);
@@ -22,6 +31,14 @@ router.get('/subtipos', getSubtipos);
 router.post('/subtipos', createSubtipo);
 router.put('/subtipos/:id', updateSubtipo);
 router.delete('/subtipos/:id', deleteSubtipo);
+
+// Rutas para tipologías extendidas (nivel 3 y 4)
+router.get('/tipologias-extendidas', obtenerTipologiasExtendidas);
+router.get('/tipologias-extendidas/:id', obtenerTipologiaExtendidaPorId);
+router.post('/tipologias-extendidas', crearTipologiaExtendida);
+router.put('/tipologias-extendidas/:id', actualizarTipologiaExtendida);
+router.delete('/tipologias-extendidas/:id', eliminarTipologiaExtendida);
+router.get('/tipologias-extendidas/por-subtipo/:subtipoId', obtenerTipologiasPorSubtipo);
 
 router.get('/configuraciones', getConfiguraciones);
 router.post('/configuraciones', createConfiguracion);

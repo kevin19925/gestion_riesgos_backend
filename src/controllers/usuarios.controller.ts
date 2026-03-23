@@ -16,7 +16,7 @@ export const getUsuarios = async (req: Request, res: Response) => {
                 createdAt: true,
                 updatedAt: true,
                 cargo: { select: { id: true, nombre: true } },
-                role: { select: { id: true, codigo: true, nombre: true } },
+                roleRelacion: { select: { id: true, codigo: true, nombre: true } },
             },
         });
         res.json(users);
@@ -40,7 +40,7 @@ export const getUsuarioById = async (req: Request, res: Response) => {
                 createdAt: true,
                 updatedAt: true,
                 cargo: { select: { id: true, nombre: true } },
-                role: { select: { id: true, codigo: true, nombre: true } },
+                roleRelacion: { select: { id: true, codigo: true, nombre: true } },
             },
         });
         if (!user) return res.status(404).json({ error: 'User not found' });
@@ -108,7 +108,7 @@ export const createUsuario = async (req: Request, res: Response) => {
                 createdAt: true,
                 updatedAt: true,
                 cargo: { select: { id: true, nombre: true } },
-                role: { select: { id: true, codigo: true, nombre: true } },
+                roleRelacion: { select: { id: true, codigo: true, nombre: true } },
             },
         });
         
@@ -153,7 +153,7 @@ export const updateUsuario = async (req: Request, res: Response) => {
                 createdAt: true,
                 updatedAt: true,
                 cargo: { select: { id: true, nombre: true } },
-                role: { select: { id: true, codigo: true, nombre: true } },
+                roleRelacion: { select: { id: true, codigo: true, nombre: true } },
             },
         });
         res.json(user);

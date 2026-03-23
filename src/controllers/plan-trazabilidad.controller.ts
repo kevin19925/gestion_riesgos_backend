@@ -9,6 +9,7 @@ import prisma from '../prisma';
 /**
  * PUT /api/causas/:id/plan/estado
  * Cambia el estado de un plan de acción
+ * REFACTORIZADO: Trabaja con tabla PlanAccion y HistorialEstadoPlan
  */
 export const cambiarEstadoPlan = async (req: Request, res: Response) => {
   try {
@@ -16,7 +17,7 @@ export const cambiarEstadoPlan = async (req: Request, res: Response) => {
     const { estado, observacion } = req.body;
 
     // Validar estado
-    const estadosValidos = ['en_revision', 'revisado'];
+    const estadosValidos = ['pendiente', 'en_revision', 'revisado', 'PENDIENTE', 'EN_REVISION', 'REVISADO', 'EN_PROGRESO', 'COMPLETADO'];
     if (!estado || !estadosValidos.includes(estado)) {
       return res.status(400).json({
         error: 'Estado inválido',
@@ -34,43 +35,43 @@ export const cambiarEstadoPlan = async (req: Request, res: Response) => {
       return res.status(404).json({ error: 'Causa no encontrada' });
     }
 
-    // Verificar que tiene plan
-    if (!causa.tipoGestion || !['PLAN', 'AMBOS'].includes(causa.tipoGestion)) {
+    // Buscar el plan asociado
+    const plan = await prisma.planAccion.findFirst({
+      where: { causaRiesgoId: causaId }
+    });
+
+    if (!plan) {
       return res.status(400).json({
         error: 'Esta causa no tiene un plan de acción asociado'
       });
     }
 
-    const gestion = (causa.gestion as any) || {};
+    const estadoAnterior = plan.estado;
 
-    // Crear entrada en historial de estados
-    const historialEstados = gestion.historialEstados || [];
-    historialEstados.push({
-      estado,
-      fecha: new Date().toISOString(),
-      usuario: (req as any).user?.nombre || 'Sistema',
-      observacion: observacion || ''
+    // Actualizar estado del plan
+    const planActualizado = await prisma.planAccion.update({
+      where: { id: plan.id },
+      data: { estado }
     });
 
-    // Actualizar gestion con nuevo estado
-    const gestionActualizada = {
-      ...gestion,
-      planEstado: estado,
-      historialEstados
-    };
-
-    // Actualizar en BD
-    const causaActualizada = await prisma.causaRiesgo.update({
-      where: { id: causaId },
-      data: { gestion: gestionActualizada }
+    // Crear entrada en historial de estados
+    await prisma.historialEstadoPlan.create({
+      data: {
+        causaRiesgoId: causaId,
+        estado,
+        responsable: (req as any).user?.nombre || 'Sistema',
+        detalle: observacion || '',
+        fechaEstado: new Date(),
+        origenMigracion: false
+      }
     });
 
     // Log para debugging
     console.log('✅ Estado actualizado:', {
       causaId,
-      estadoAnterior: gestion.planEstado,
-      estadoNuevo: estado,
-      gestionGuardada: (causaActualizada.gestion as any)?.planEstado
+      planId: plan.id,
+      estadoAnterior,
+      estadoNuevo: estado
     });
 
     // Registrar en historial de eventos
@@ -84,19 +85,19 @@ export const cambiarEstadoPlan = async (req: Request, res: Response) => {
         modulo: 'planes',
         pagina: 'plan-accion',
         seccion: 'estado',
-        entidadTipo: 'CausaRiesgo',
-        entidadId: causaId,
+        entidadTipo: 'PlanAccion',
+        entidadId: plan.id,
         accion: 'UPDATE',
-        descripcion: `Cambio de estado del plan: ${gestion.planEstado || 'sin estado'} → ${estado}`,
-        valorAnterior: gestion.planEstado || 'sin estado',
+        descripcion: `Cambio de estado del plan: ${estadoAnterior} → ${estado}`,
+        valorAnterior: estadoAnterior,
         valorNuevo: estado
       }
     });
 
     res.json({
       success: true,
-      causa: causaActualizada,
-      estadoAnterior: gestion.planEstado,
+      plan: planActualizado,
+      estadoAnterior,
       estadoNuevo: estado
     });
   } catch (error) {
@@ -108,6 +109,7 @@ export const cambiarEstadoPlan = async (req: Request, res: Response) => {
 /**
  * POST /api/causas/:id/plan/convertir-a-control
  * Convierte un plan de acción exitoso en un control permanente
+ * REFACTORIZADO: Trabaja con tabla PlanAccion normalizada
  */
 export const convertirPlanAControl = async (req: Request, res: Response) => {
   try {
@@ -133,28 +135,37 @@ export const convertirPlanAControl = async (req: Request, res: Response) => {
       return res.status(404).json({ error: 'Causa no encontrada' });
     }
 
-    // Verificar que tiene plan
-    if (!causa.tipoGestion || !['PLAN', 'AMBOS'].includes(causa.tipoGestion)) {
+    // Buscar el plan asociado
+    const plan = await prisma.planAccion.findFirst({
+      where: { causaRiesgoId: causaId }
+    });
+
+    if (!plan) {
       return res.status(400).json({
         error: 'Esta causa no tiene un plan de acción asociado'
       });
     }
 
-    const gestion = (causa.gestion as any) || {};
-
     // Verificar que el plan está completado
-    if (gestion.planEstado !== 'completado') {
+    if (plan.estado !== 'COMPLETADO' && plan.estado !== 'completado' && plan.estado !== 'revisado') {
       return res.status(400).json({
         error: 'Solo se pueden convertir planes completados',
-        estadoActual: gestion.planEstado || 'sin estado'
+        estadoActual: plan.estado
       });
     }
 
     // Verificar que no fue convertido previamente
-    if (gestion.controlDerivadoId) {
+    // Buscar en el historial si ya existe una conversión
+    const conversionPrevia = await prisma.historialEstadoPlan.findFirst({
+      where: { 
+        causaRiesgoId: causaId,
+        estado: 'CONVERTIDO_A_CONTROL'
+      }
+    });
+
+    if (conversionPrevia) {
       return res.status(400).json({
-        error: 'Este plan ya fue convertido a control',
-        controlId: gestion.controlDerivadoId
+        error: 'Este plan ya fue convertido a control previamente'
       });
     }
 
@@ -165,35 +176,47 @@ export const convertirPlanAControl = async (req: Request, res: Response) => {
       });
     }
 
-    // Crear el control
-    const nuevoControl = await prisma.control.create({
+    // Crear el control en ControlRiesgo
+    const nuevoControl = await prisma.controlRiesgo.create({
       data: {
-        riesgoId: causa.riesgoId,
-        descripcion: gestion.planDescripcion || gestion.planDetalle || causa.descripcion,
+        causaRiesgoId: causaId,
+        descripcion: plan.descripcion || causa.descripcion,
         tipoControl,
-        diseño: 3, // Valor por defecto
-        ejecucion: 3, // Valor por defecto
-        solidez: 3, // Valor por defecto
-        efectividad: 0.75, // 75% por defecto para controles derivados de planes exitosos
-        riesgoResidual: 0,
-        clasificacionResidual: 'Por evaluar',
-        causaRiesgoOrigenId: causaId,
-        fechaCreacionDesdePlan: new Date()
+        responsable: plan.responsable || '',
+        descripcionControl: `Control derivado del plan: ${plan.descripcion}`,
+        recomendacion: observaciones || '',
+        // Valores por defecto para campos requeridos
+        aplicabilidad: 3,
+        cobertura: 3,
+        facilidadUso: 3,
+        segregacion: 3,
+        naturaleza: 1, // Manual
+        desviaciones: 0,
+        puntajeControl: 75, // 75% por defecto para controles derivados de planes exitosos
+        evaluacionPreliminar: 'Efectivo',
+        evaluacionDefinitiva: 'Por evaluar'
       }
     });
 
-    // Actualizar gestion del plan con referencia al control
-    const gestionActualizada = {
-      ...gestion,
-      controlDerivadoId: nuevoControl.id,
-      fechaConversion: new Date().toISOString(),
-      observacionesConversion: observaciones || ''
-    };
+    // Actualizar el plan para marcar que fue convertido
+    await prisma.planAccion.update({
+      where: { id: plan.id },
+      data: {
+        observaciones: `${plan.observaciones || ''}\n[Convertido a control ID: ${nuevoControl.id}]`.trim()
+      }
+    });
 
-    // Actualizar causa
-    const causaActualizada = await prisma.causaRiesgo.update({
-      where: { id: causaId },
-      data: { gestion: gestionActualizada }
+    // Crear entrada en historial
+    await prisma.historialEstadoPlan.create({
+      data: {
+        causaRiesgoId: causaId,
+        estado: 'CONVERTIDO_A_CONTROL',
+        responsable: (req as any).user?.nombre || 'Sistema',
+        detalle: `Plan convertido a control (ID: ${nuevoControl.id})`,
+        decision: observaciones || '',
+        fechaEstado: new Date(),
+        origenMigracion: false
+      }
     });
 
     // Registrar en historial de eventos
@@ -207,8 +230,8 @@ export const convertirPlanAControl = async (req: Request, res: Response) => {
         modulo: 'planes',
         pagina: 'plan-accion',
         seccion: 'conversion',
-        entidadTipo: 'CausaRiesgo',
-        entidadId: causaId,
+        entidadTipo: 'PlanAccion',
+        entidadId: plan.id,
         accion: 'CREATE',
         descripcion: `Plan convertido a control (ID: ${nuevoControl.id})`,
         valoresNuevos: {
@@ -222,7 +245,7 @@ export const convertirPlanAControl = async (req: Request, res: Response) => {
     res.status(201).json({
       success: true,
       control: nuevoControl,
-      causa: causaActualizada,
+      plan,
       message: 'Plan convertido exitosamente a control'
     });
   } catch (error) {
@@ -234,6 +257,7 @@ export const convertirPlanAControl = async (req: Request, res: Response) => {
 /**
  * GET /api/causas/:id/plan/trazabilidad
  * Obtiene el historial completo de trazabilidad de un plan
+ * REFACTORIZADO: Trabaja con tablas PlanAccion y HistorialEstadoPlan
  */
 export const obtenerTrazabilidadPlan = async (req: Request, res: Response) => {
   try {
@@ -255,21 +279,56 @@ export const obtenerTrazabilidadPlan = async (req: Request, res: Response) => {
       return res.status(404).json({ error: 'Causa no encontrada' });
     }
 
-    const gestion = (causa.gestion as any) || {};
+    // Obtener el plan asociado
+    const plan = await prisma.planAccion.findFirst({
+      where: { causaRiesgoId: causaId },
+      orderBy: { createdAt: 'desc' }
+    });
+
+    if (!plan) {
+      return res.status(404).json({ 
+        error: 'Esta causa no tiene un plan de acción asociado' 
+      });
+    }
+
+    // Obtener historial de estados del plan
+    const historialEstados = await prisma.historialEstadoPlan.findMany({
+      where: { causaRiesgoId: causaId },
+      orderBy: { fechaEstado: 'desc' }
+    });
 
     // Obtener control derivado si existe
+    // Buscar en el historial si hay una conversión
+    const conversionHistorial = await prisma.historialEstadoPlan.findFirst({
+      where: { 
+        causaRiesgoId: causaId,
+        estado: 'CONVERTIDO_A_CONTROL'
+      },
+      orderBy: { fechaEstado: 'desc' }
+    });
+
     let controlDerivado = null;
-    if (gestion.controlDerivadoId) {
-      controlDerivado = await prisma.control.findUnique({
-        where: { id: gestion.controlDerivadoId }
+    if (conversionHistorial) {
+      // Buscar el control más reciente de esta causa
+      controlDerivado = await prisma.controlRiesgo.findFirst({
+        where: { causaRiesgoId: causaId },
+        orderBy: { id: 'desc' }
       });
     }
 
     // Obtener historial de eventos relacionados
     const historialEventos = await prisma.historialEvento.findMany({
       where: {
-        entidadTipo: 'CausaRiesgo',
-        entidadId: causaId
+        OR: [
+          {
+            entidadTipo: 'CausaRiesgo',
+            entidadId: causaId
+          },
+          {
+            entidadTipo: 'PlanAccion',
+            entidadId: plan.id
+          }
+        ]
       },
       orderBy: { fecha: 'desc' },
       take: 50
@@ -280,7 +339,6 @@ export const obtenerTrazabilidadPlan = async (req: Request, res: Response) => {
       causa: {
         id: causa.id,
         descripcion: causa.descripcion,
-        tipoGestion: causa.tipoGestion,
         riesgo: {
           id: causa.riesgo?.id,
           numeroIdentificacion: (causa.riesgo as any)?.numeroIdentificacion,
@@ -289,20 +347,35 @@ export const obtenerTrazabilidadPlan = async (req: Request, res: Response) => {
         }
       },
       plan: {
-        descripcion: gestion.planDescripcion,
-        responsable: gestion.planResponsable,
-        fechaEstimada: gestion.planFechaEstimada,
-        estado: gestion.planEstado,
-        detalle: gestion.planDetalle,
-        decision: gestion.planDecision
+        id: plan.id,
+        descripcion: plan.descripcion,
+        responsable: plan.responsable,
+        fechaInicio: plan.fechaInicio,
+        fechaFin: plan.fechaFin,
+        fechaProgramada: plan.fechaProgramada,
+        estado: plan.estado,
+        porcentajeAvance: plan.porcentajeAvance,
+        observaciones: plan.observaciones,
+        createdAt: plan.createdAt,
+        updatedAt: plan.updatedAt
       },
-      historialEstados: gestion.historialEstados || [],
+      historialEstados: historialEstados.map(h => ({
+        id: h.id,
+        estado: h.estado,
+        responsable: h.responsable,
+        detalle: h.detalle,
+        decision: h.decision,
+        porcentajeAvance: h.porcentajeAvance,
+        fechaEstado: h.fechaEstado,
+        registradoEn: h.registradoEn
+      })),
       controlDerivado: controlDerivado ? {
         id: controlDerivado.id,
         descripcion: controlDerivado.descripcion,
         tipoControl: controlDerivado.tipoControl,
-        efectividad: controlDerivado.efectividad,
-        fechaCreacion: gestion.fechaConversion
+        puntajeControl: controlDerivado.puntajeControl,
+        evaluacionDefinitiva: controlDerivado.evaluacionDefinitiva,
+        createdAt: controlDerivado.createdAt
       } : null,
       eventos: historialEventos.map(e => ({
         fecha: e.fecha,
@@ -324,11 +397,12 @@ export const obtenerTrazabilidadPlan = async (req: Request, res: Response) => {
 /**
  * GET /api/planes-accion/alertas-vencimiento
  * Obtiene alertas de vencimiento para el usuario actual
+ * REFACTORIZADO: Trabaja con tabla PlanAccion normalizada
  */
 export const obtenerAlertasVencimiento = async (req: Request, res: Response) => {
   try {
     const user = (req as any).user;
-    const usuarioId = user?.userId || user?.id; // Soportar ambos formatos
+    const usuarioId = user?.userId || user?.id;
     const soloNoLeidas = req.query.soloNoLeidas === 'true';
 
     if (!usuarioId) {
@@ -349,6 +423,10 @@ export const obtenerAlertasVencimiento = async (req: Request, res: Response) => 
               include: {
                 proceso: true
               }
+            },
+            planesAccion: {
+              take: 1,
+              orderBy: { createdAt: 'desc' }
             }
           }
         }
@@ -358,7 +436,7 @@ export const obtenerAlertasVencimiento = async (req: Request, res: Response) => 
 
     // Formatear alertas con información del plan
     const alertasFormateadas = alertas.map(alerta => {
-      const gestion = (alerta.causaRiesgo.gestion as any) || {};
+      const plan = alerta.causaRiesgo.planesAccion[0];
       return {
         id: alerta.id,
         tipo: alerta.tipo,
@@ -367,10 +445,10 @@ export const obtenerAlertasVencimiento = async (req: Request, res: Response) => 
         fechaGeneracion: alerta.fechaGeneracion,
         plan: {
           causaId: alerta.causaRiesgoId,
-          descripcion: gestion.planDescripcion || alerta.causaRiesgo.descripcion,
-          responsable: gestion.planResponsable,
-          fechaEstimada: gestion.planFechaEstimada,
-          estado: gestion.planEstado
+          descripcion: plan?.descripcion || alerta.causaRiesgo.descripcion,
+          responsable: plan?.responsable,
+          fechaEstimada: plan?.fechaFin,
+          estado: plan?.estado
         },
         riesgo: {
           id: alerta.causaRiesgo.riesgo?.id,
@@ -451,7 +529,8 @@ export const marcarAlertaLeida = async (req: Request, res: Response) => {
 
 /**
  * GET /api/planes-accion
- * Obtiene todos los planes de acción desde CausaRiesgo.gestion
+ * Obtiene todos los planes de acción desde tabla PlanAccion
+ * REFACTORIZADO: Trabaja con tabla PlanAccion normalizada
  */
 export const obtenerPlanesAccion = async (req: Request, res: Response) => {
   try {
@@ -460,124 +539,87 @@ export const obtenerPlanesAccion = async (req: Request, res: Response) => {
 
     // Construir filtros
     const where: any = {
-      tipoGestion: { in: ['PLAN', 'AMBOS'] }
+      causaRiesgoId: { not: null }
     };
+
+    // Filtrar por estado si se especifica
+    if (estado) {
+      where.estado = estado;
+    }
 
     // Filtrar por proceso si se especifica
     if (procesoId) {
-      where.riesgo = {
-        procesoId: Number(procesoId)
+      where.causaRiesgo = {
+        riesgo: {
+          procesoId: Number(procesoId)
+        }
       };
     }
 
-    // Obtener causas con planes
-    const causas = await prisma.causaRiesgo.findMany({
+    // Obtener planes
+    const planes = await prisma.planAccion.findMany({
       where,
       include: {
-        riesgo: {
+        causaRiesgo: {
           include: {
-            proceso: {
-              select: {
-                id: true,
-                nombre: true
+            riesgo: {
+              include: {
+                proceso: {
+                  select: {
+                    id: true,
+                    nombre: true
+                  }
+                }
               }
             }
           }
         }
       },
-      orderBy: { id: 'desc' }
+      orderBy: { createdAt: 'desc' }
     });
 
-    // Transformar a formato de planes
-    const planes = causas
-      .map((causa) => {
-        const gestion = (causa.gestion as any) || {};
-        
-        // Log para debugging
-        console.log('📋 Procesando causa:', {
-          causaId: causa.id,
-          tipoGestion: causa.tipoGestion,
-          tieneGestion: !!gestion,
-          planDescripcion: gestion.planDescripcion,
-          planDetalle: gestion.planDetalle,
-          planResponsable: gestion.planResponsable,
-          riesgoId: causa.riesgoId,
-          procesoId: causa.riesgo?.procesoId
-        });
-        
-        // Verificar que tenga datos de plan
-        // CAMBIADO: Aceptar si tiene planDescripcion O planDetalle O planResponsable
-        const tienePlan = gestion.planDescripcion || gestion.planDetalle || gestion.planResponsable;
-        if (!tienePlan) {
-          console.log('⚠️ Causa sin datos de plan, omitiendo:', causa.id);
-          return null;
-        }
-
-        // Mapear estado del JSON al formato del frontend
-        let estadoFrontend = 'en_revision';
-        if (gestion.planEstado) {
-          const estadoMap: Record<string, string> = {
-            'en_revision': 'en_revision',
-            'revisado': 'revisado',
-            // Mapeo de estados antiguos a nuevos
-            'pendiente': 'en_revision',
-            'en_progreso': 'en_revision',
-            'completado': 'revisado',
-            'cancelado': 'en_revision',
-          };
-          estadoFrontend = estadoMap[gestion.planEstado] || 'en_revision';
-        }
-
-        return {
-          id: causa.id,
-          causaRiesgoId: causa.id,
-          riesgoId: causa.riesgoId,
-          descripcion: gestion.planDescripcion || gestion.planDetalle || causa.descripcion || 'Sin descripción',
-          causaDescripcion: causa.descripcion || '', // AGREGADO: Descripción de la causa
-          responsable: gestion.planResponsable || '',
-          fechaInicio: gestion.planFechaInicio || null,
-          fechaFin: gestion.planFechaEstimada || null,
-          fechaProgramada: gestion.planFechaEstimada || null,
-          estado: estadoFrontend,
-          observaciones: gestion.planDetalle || '',
-          controlDerivadoId: gestion.controlDerivadoId || null,
-          fechaConversion: gestion.fechaConversion || null,
-          createdAt: (causa as any).createdAt || new Date().toISOString(),
-          updatedAt: (causa as any).updatedAt || new Date().toISOString(),
-          // Datos del riesgo
-          riesgo: {
-            id: causa.riesgo?.id,
-            numeroIdentificacion: causa.riesgo?.numeroIdentificacion,
-            descripcion: causa.riesgo?.descripcion,
-            proceso: causa.riesgo?.proceso
-          }
-        };
-      })
-      .filter((plan) => plan !== null);
-
-    // Filtrar por estado si se especifica
-    let planesFiltrados = planes;
-    if (estado) {
-      planesFiltrados = planes.filter((plan) => plan.estado === estado);
-    }
+    // Transformar a formato esperado por el frontend
+    const planesFormateados = planes.map((plan) => ({
+      id: plan.id,
+      causaRiesgoId: plan.causaRiesgoId,
+      riesgoId: plan.riesgoId,
+      descripcion: plan.descripcion || 'Sin descripción',
+      causaDescripcion: plan.causaRiesgo?.descripcion || '',
+      responsable: plan.responsable || '',
+      fechaInicio: plan.fechaInicio,
+      fechaFin: plan.fechaFin,
+      fechaProgramada: plan.fechaProgramada || plan.fechaFin,
+      estado: plan.estado,
+      observaciones: plan.observaciones || '',
+      porcentajeAvance: plan.porcentajeAvance || 0,
+      createdAt: plan.createdAt,
+      updatedAt: plan.updatedAt,
+      // Datos del riesgo
+      riesgo: {
+        id: plan.causaRiesgo?.riesgo?.id,
+        numeroIdentificacion: plan.causaRiesgo?.riesgo?.numeroIdentificacion,
+        descripcion: plan.causaRiesgo?.riesgo?.descripcion,
+        proceso: plan.causaRiesgo?.riesgo?.proceso
+      }
+    }));
 
     // Estadísticas
     const stats = {
-      total: planes.length,
-      enRevision: planes.filter((p) => p.estado === 'en_revision').length,
-      revisados: planes.filter((p) => p.estado === 'revisado').length,
+      total: planesFormateados.length,
+      pendientes: planesFormateados.filter((p) => p.estado === 'pendiente' || p.estado === 'PENDIENTE').length,
+      enRevision: planesFormateados.filter((p) => p.estado === 'en_revision' || p.estado === 'EN_REVISION').length,
+      revisados: planesFormateados.filter((p) => p.estado === 'revisado' || p.estado === 'REVISADO' || p.estado === 'COMPLETADO').length,
     };
 
     console.log('✅ Planes encontrados:', {
-      totalCausas: causas.length,
-      totalPlanes: planes.length,
-      planesFiltrados: planesFiltrados.length,
+      totalPlanes: planesFormateados.length,
       procesoId: procesoId || 'todos',
+      estado: estado || 'todos',
       stats
     });
 
     res.json({
-      planes: planesFiltrados,
+      planes: planesFormateados,
       stats
     });
   } catch (error) {

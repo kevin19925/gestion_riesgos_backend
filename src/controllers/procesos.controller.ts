@@ -49,7 +49,7 @@ export const getProcesos = async (req: Request, res: Response) => {
                                 id: true,
                                 nombre: true,
                                 email: true,
-                                role: {
+                                roleRelacion: {
                                     select: {
                                         codigo: true,
                                         nombre: true
@@ -92,7 +92,7 @@ export const getProcesos = async (req: Request, res: Response) => {
                     id: r.usuario.id,
                     nombre: r.usuario.nombre,
                     email: r.usuario.email,
-                    role: r.usuario.role?.codigo || null,
+                    role: r.usuario.roleRelacion?.codigo || null,
                     modo: modo
                 };
             });
