@@ -137,9 +137,13 @@ export const getPlanById = async (req: Request, res: Response) => {
 
 export const createPlan = async (req: Request, res: Response) => {
   try {
+    // Extraer riesgoId/incidenciaId desde URL params (si existen) o desde body
+    const riesgoIdFromParams = req.params.riesgoId ? Number(req.params.riesgoId) : null;
+    const incidenciaIdFromParams = req.params.incidenciaId ? Number(req.params.incidenciaId) : null;
+    
     const {
-      riesgoId,
-      incidenciaId,
+      riesgoId: riesgoIdFromBody,
+      incidenciaId: incidenciaIdFromBody,
       causaRiesgoId,
       nombre,
       objetivo,
@@ -154,6 +158,10 @@ export const createPlan = async (req: Request, res: Response) => {
       porcentajeAvance,
       observaciones,
     } = req.body;
+
+    // Priorizar params sobre body
+    const riesgoId = riesgoIdFromParams || riesgoIdFromBody;
+    const incidenciaId = incidenciaIdFromParams || incidenciaIdFromBody;
 
     if (!descripcion) {
       return res.status(400).json({ error: "descripcion is required" });
