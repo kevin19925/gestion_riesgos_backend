@@ -14,6 +14,8 @@ import rolesRoutes from './roles.routes';
 import controlesRoutes from './controles.routes';
 import incidenciasRoutes from './incidencias.routes';
 import planesAccionRoutes from './planes-accion.routes';
+import planTrazabilidadRoutes from './plan-trazabilidad.routes';
+import cronRoutes from './cron.routes';
 import dofaRoutes from './dofa.routes';
 import normatividadRoutes from './normatividad.routes';
 import contextoRoutes from './contexto.routes';
@@ -66,7 +68,9 @@ router.use('/roles', rolesRoutes);
 // New Routes - Risk Management
 router.use('/controles', controlesRoutes);
 router.use('/incidencias', incidenciasRoutes);
+router.use('/', planTrazabilidadRoutes); // Rutas de trazabilidad de planes (causas/:id/plan/*, alertas/*, planes-accion/alertas-vencimiento) - DEBE IR ANTES
 router.use('/planes-accion', planesAccionRoutes);
+router.use('/cron', cronRoutes); // Gestión de cron jobs y alertas automáticas
 router.use('/dofa', dofaRoutes);
 router.use('/normatividad', normatividadRoutes);
 router.use('/contexto', contextoRoutes);

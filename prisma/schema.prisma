@@ -40,6 +40,7 @@ model Usuario {
   cargo                         Cargo?                   @relation(fields: [cargoId], references: [id])
   role                          Role                     @relation(fields: [roleId], references: [id], onDelete: NoAction, onUpdate: NoAction)
   procesosParticipantes         Proceso[]                @relation("Participantes")
+  alertasVencimiento            AlertaVencimiento[]      // NUEVA RELACIÓN
 }
 
 model Cargo {
@@ -222,13 +223,20 @@ model CausaRiesgo {
   frecuencia   String?
   seleccionada Boolean         @default(false)
   tipoGestion  String?
-  gestion      Json?
+  gestion      Json?           // Contiene planDescripcion, planResponsable, planFechaEstimada, etc.
   riesgo       Riesgo          @relation(fields: [riesgoId], references: [id], onDelete: Cascade)
   controles    ControlRiesgo[]
   incidencias  Incidencia[]
   planesAccion PlanAccion[]
+  
+  // NUEVA RELACIÓN: Controles derivados de planes en esta causa
+  controlesDerivados Control[] @relation("CausaToControl")
+  
+  // NUEVA RELACIÓN: Alertas de vencimiento para planes en esta causa
+  alertas      AlertaVencimiento[]
 
   @@index([riesgoId])
+  @@index([tipoGestion])
 }
 
 model ControlRiesgo {
@@ -308,6 +316,11 @@ model PlanAccion {
   presupuesto      Float?
   porcentajeAvance Int?
   observaciones    String?
+  
+  // NOTA: Esta tabla existe pero NO se usa actualmente
+  // Los planes están en CausaRiesgo.gestion (JSON)
+  // Esta tabla está reservada para uso futuro
+  
   createdAt        DateTime            @default(now())
   updatedAt        DateTime            @updatedAt
   causaRiesgoId    Int?
@@ -317,6 +330,8 @@ model PlanAccion {
   riesgo           Riesgo?             @relation(fields: [riesgoId], references: [id])
 
   @@index([causaRiesgoId])
+  @@index([estado])
+  @@index([fechaProgramada])
 }
 
 model Control {
@@ -330,11 +345,20 @@ model Control {
   efectividad           Float
   riesgoResidual        Float
   clasificacionResidual String
+  
+  // NUEVOS CAMPOS: Trazabilidad de origen desde plan de acción (en CausaRiesgo.gestion)
+  causaRiesgoOrigenId   Int?     @unique
+  fechaCreacionDesdePlan DateTime?
+  
   createdAt             DateTime @default(now())
   updatedAt             DateTime @updatedAt
   riesgo                Riesgo   @relation(fields: [riesgoId], references: [id], onDelete: Cascade)
+  
+  // NUEVA RELACIÓN: Causa de riesgo que originó este control (donde está el plan en JSON)
+  causaRiesgoOrigen     CausaRiesgo? @relation("CausaToControl", fields: [causaRiesgoOrigenId], references: [id], onDelete: SetNull)
 
   @@index([riesgoId])
+  @@index([causaRiesgoOrigenId])
 }
 
 model Incidencia {
@@ -741,4 +765,27 @@ model AuditLog {
   @@index([tabla, accion])
   @@index([createdAt, tabla])
   @@index([usuarioId, createdAt])
+}
+
+// NUEVO MODELO: Alertas de vencimiento para planes de acción (en CausaRiesgo.gestion)
+model AlertaVencimiento {
+  id              Int         @id @default(autoincrement())
+  causaRiesgoId   Int         // Referencia a CausaRiesgo (donde está el plan en JSON)
+  usuarioId       Int
+  tipo            String      // "proximo" | "vencido"
+  diasRestantes   Int?
+  leida           Boolean     @default(false)
+  fechaGeneracion DateTime    @default(now())
+  fechaLectura    DateTime?
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+  
+  causaRiesgo     CausaRiesgo @relation(fields: [causaRiesgoId], references: [id], onDelete: Cascade)
+  usuario         Usuario     @relation(fields: [usuarioId], references: [id])
+  
+  @@index([causaRiesgoId])
+  @@index([usuarioId])
+  @@index([leida])
+  @@index([fechaGeneracion])
+  @@index([tipo])
 }
