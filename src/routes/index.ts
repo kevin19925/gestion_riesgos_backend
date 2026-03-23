@@ -12,6 +12,7 @@ import cargosRoutes from './cargos.routes';
 import gerenciasRoutes from './gerencias.routes';
 import rolesRoutes from './roles.routes';
 import controlesRoutes from './controles.routes';
+import controlRiesgoRoutes from './control-riesgo.routes';
 import incidenciasRoutes from './incidencias.routes';
 import planesAccionRoutes from './planes-accion.routes';
 import planTrazabilidadRoutes from './plan-trazabilidad.routes';
@@ -67,6 +68,7 @@ router.use('/roles', rolesRoutes);
 
 // New Routes - Risk Management
 router.use('/controles', controlesRoutes);
+router.use('/controles-riesgo', controlRiesgoRoutes); // Controles normalizados (tabla ControlRiesgo)
 router.use('/incidencias', incidenciasRoutes);
 router.use('/', planTrazabilidadRoutes); // Rutas de trazabilidad de planes (causas/:id/plan/*, alertas/*, planes-accion/alertas-vencimiento) - DEBE IR ANTES
 router.use('/planes-accion', planesAccionRoutes);
