@@ -88,7 +88,7 @@ Response: { status: "ok", db: true }
 ### 2. Login
 ```
 POST /api/auth/login
-Body: { username: "vbarahona@comware.com.ec", password: "Vini2026" }
+Body: { username: "usuario@ejemplo.com", password: "password_de_prueba" }
 Status: 200 OK
 Response: { token: "eyJ...", usuario: {...} }
 ```
@@ -138,7 +138,7 @@ Response: {
   message: "Auth funciona",
   user: {
     userId: 117,
-    email: "vbarahona@comware.com.ec",
+    email: "usuario@ejemplo.com",
     role: "dueño_procesos"
   }
 }

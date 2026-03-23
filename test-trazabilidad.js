@@ -146,10 +146,10 @@ async function test2_login() {
   console.log(`\n${colors.blue}═══ PRUEBA 2: Login ═══${colors.reset}`);
   
   try {
-    // Credenciales reales
+    // Credenciales de prueba
     const credentials = {
-      username: 'vbarahona@comware.com.ec',
-      password: 'Vini2026'
+      username: 'usuario@ejemplo.com',
+      password: 'password_de_prueba'
     };
     
     const response = await makeRequest('POST', '/api/auth/login', credentials);

@@ -34,8 +34,8 @@ async function makeRequest(method, path, data = null, headers = {}) {
 async function test() {
   // Login
   const login = await makeRequest('POST', '/api/auth/login', {
-    username: 'vbarahona@comware.com.ec',
-    password: 'Vini2026'
+    username: 'usuario@ejemplo.com',
+    password: 'password_de_prueba'
   });
   
   if (login.statusCode !== 200) {

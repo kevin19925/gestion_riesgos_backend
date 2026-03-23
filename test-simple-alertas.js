@@ -79,8 +79,8 @@ async function test() {
   // PASO 1: Login
   console.log('PASO 1: Login');
   const loginResponse = await makeRequest('POST', '/api/auth/login', {
-    username: 'vbarahona@comware.com.ec',
-    password: 'Vini2026'
+    username: 'usuario@ejemplo.com',
+    password: 'password_de_prueba'
   });
 
   if (loginResponse.statusCode !== 200 || !loginResponse.body.token) {
