@@ -28,6 +28,8 @@ import debugRoutes from './debug.routes';
 import auditRoutes from './audit.routes';
 import iaRoutes from './ia.routes';
 import reunionesIndividualRoutes from './reuniones-individual.routes';
+import auth2FARoutes from './auth-2fa.routes';
+import admin2FARoutes from './admin-2fa.routes';
 
 const router = Router();
 
@@ -53,6 +55,8 @@ router.get('/health', async (_req, res) => {
 
 // Auth Routes
 router.use('/auth', authRoutes);
+router.use('/auth/2fa', auth2FARoutes); // Rutas de 2FA para usuarios
+router.use('/admin/2fa', admin2FARoutes); // Rutas de administración de 2FA
 router.use('/usuarios', usuariosRoutes);
 router.use('/utilidades', utilidadesRoutes);
 

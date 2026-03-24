@@ -21,27 +21,33 @@ model Role {
 }
 
 model Usuario {
-  id                            Int                  @id @default(autoincrement())
+  id                            Int                       @id @default(autoincrement())
   nombre                        String
-  email                         String               @unique
+  email                         String                    @unique
   password                      String
   cargoId                       Int?
-  activo                        Boolean              @default(true)
-  createdAt                     DateTime             @default(now())
-  updatedAt                     DateTime             @updatedAt
+  activo                        Boolean                   @default(true)
+  createdAt                     DateTime                  @default(now())
+  updatedAt                     DateTime                  @updatedAt
   roleId                        Int
   fotoPerfil                    String?
+  twoFactorEnabled              Boolean                   @default(false)
+  twoFactorSecret               String?
+  recoveryCodes                 String[]
+  twoFactorBackupUsed           Int                       @default(0)
   alertasVencimiento            AlertaVencimiento[]
-  areasDirector                 Area[]               @relation("DirectorArea")
+  areasDirector                 Area[]                    @relation("DirectorArea")
   incidenciasResponsable        Incidencia[]
-  observaciones                 Observacion[]        @relation("AutorObservacion")
-  procesosResponsable           Proceso[]            @relation("ResponsableProceso")
-  procesosResponsablesMultiples ProcesoResponsable[] @relation("ProcesoResponsables")
-  cargo                         Cargo?               @relation(fields: [cargoId], references: [id])
-  roleRelacion                  Role                 @relation(fields: [roleId], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  procesosParticipantes         Proceso[]            @relation("Participantes")
-  asistenciasProceso            AsistentesProceso[]  @relation("AsistentesProceso")
-  asistenciasReunion            AsistenciaReunion[]  @relation("AsistenciaReunion")
+  observaciones                 Observacion[]             @relation("AutorObservacion")
+  procesosResponsable           Proceso[]                 @relation("ResponsableProceso")
+  procesosResponsablesMultiples ProcesoResponsable[]      @relation("ProcesoResponsables")
+  cargo                         Cargo?                    @relation(fields: [cargoId], references: [id])
+  roleRelacion                  Role                      @relation(fields: [roleId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  procesosParticipantes         Proceso[]                 @relation("Participantes")
+  asistenciasProceso            AsistentesProceso[]       @relation("AsistentesProceso")
+  asistenciasReunion            AsistenciaReunion[]       @relation("AsistenciaReunion")
+  dispositivosConfiables        DispositivoConfiable[]    @relation("UsuarioDispositivos")
+  auditoriaAutenticacion        AuditoriaAutenticacion[]  @relation("UsuarioAuditoria")
 }
 
 model Cargo {
@@ -827,3 +833,62 @@ model AsistenciaReunion {
   @@index([usuarioId])
 }
 
+
+// ============================================
+// Modelos para Autenticación de Dos Factores (2FA)
+// ============================================
+
+model ConfiguracionSistema {
+  id          Int      @id @default(autoincrement())
+  clave       String   @unique
+  valor       String
+  descripcion String?
+  tipo        String   @default("string")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @default(now()) @updatedAt
+
+  @@index([clave])
+}
+
+model DispositivoConfiable {
+  id                Int      @id @default(autoincrement())
+  usuarioId         Int
+  deviceFingerprint String
+  deviceName        String?
+  ipAddress         String?
+  userAgent         String?
+  navegador         String?
+  sistemaOperativo  String?
+  activo            Boolean  @default(true)
+  createdAt         DateTime @default(now())
+  expiresAt         DateTime
+  lastUsedAt        DateTime @default(now())
+  usuario           Usuario  @relation("UsuarioDispositivos", fields: [usuarioId], references: [id], onDelete: Cascade)
+
+  @@unique([usuarioId, deviceFingerprint])
+  @@index([usuarioId])
+  @@index([deviceFingerprint])
+  @@index([expiresAt])
+  @@index([activo])
+  @@map("DispositivosConfiables")
+}
+
+model AuditoriaAutenticacion {
+  id        Int      @id @default(autoincrement())
+  usuarioId Int?
+  email     String
+  evento    String
+  exitoso   Boolean
+  metodo    String?
+  ipAddress String?
+  userAgent String?
+  detalles  Json?
+  createdAt DateTime @default(now())
+  usuario   Usuario? @relation("UsuarioAuditoria", fields: [usuarioId], references: [id], onDelete: SetNull)
+
+  @@index([usuarioId])
+  @@index([email])
+  @@index([evento])
+  @@index([createdAt])
+  @@index([exitoso])
+}

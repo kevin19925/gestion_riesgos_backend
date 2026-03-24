@@ -4,6 +4,56 @@ import { redisGet, redisSet, redisDel } from '../redisClient';
 import { recalcularResidualPorRiesgo } from '../services/recalculoResidual.service';
 
 /** Invalida caché de listado de riesgos del proceso para que el frontend vea datos actualizados */
+/**
+ * Función helper para calcular calificacionGlobalImpacto de un riesgo
+ * basándose en los impactos de su evaluación y los pesos configurados
+ */
+async function calcularCalificacionGlobalImpacto(evaluacion: any): Promise<number> {
+    // Obtener pesos de impacto desde la configuración
+    let pesosImpacto: Record<string, number> = {
+        personas: 0.10,
+        legal: 0.22,
+        ambiental: 0.10,
+        procesos: 0.14,
+        reputacion: 0.22,
+        economico: 0.22,
+        confidencialidadSGSI: 0.0,
+        disponibilidadSGSI: 0.0,
+        integridadSGSI: 0.0
+    };
+    
+    try {
+        const config = await prisma.configuracion.findUnique({
+            where: { clave: 'pesos_impacto' }
+        });
+        
+        if (config) {
+            const pesosArray = JSON.parse(config.valor) as Array<{ key: string; porcentaje: number }>;
+            pesosImpacto = {};
+            pesosArray.forEach(p => {
+                pesosImpacto[p.key] = p.porcentaje / 100; // Convertir porcentaje (0-100) a decimal (0-1)
+            });
+        }
+    } catch (error) {
+        // Usar valores por defecto
+    }
+    
+    // Calcular calificación global impacto: nivel * porcentaje_decimal, sumar todos, redondear hacia arriba
+    const calificacionGlobalImpacto = Math.ceil(
+        (Number(evaluacion.impactoPersonas || 1) * (pesosImpacto.personas || 0)) +
+        (Number(evaluacion.impactoLegal || 1) * (pesosImpacto.legal || 0)) +
+        (Number(evaluacion.impactoAmbiental || 1) * (pesosImpacto.ambiental || 0)) +
+        (Number(evaluacion.impactoProcesos || 1) * (pesosImpacto.procesos || 0)) +
+        (Number(evaluacion.impactoReputacion || 1) * (pesosImpacto.reputacion || 0)) +
+        (Number(evaluacion.impactoEconomico || 1) * (pesosImpacto.economico || 0)) +
+        (Number(evaluacion.confidencialidadSGSI || 1) * (pesosImpacto.confidencialidadSGSI || 0)) +
+        (Number(evaluacion.disponibilidadSGSI || 1) * (pesosImpacto.disponibilidadSGSI || 0)) +
+        (Number(evaluacion.integridadSGSI || 1) * (pesosImpacto.integridadSGSI || 0))
+    );
+    
+    return calificacionGlobalImpacto;
+}
+
 async function invalidarCacheRiesgosProceso(procesoId: number): Promise<void> {
     if (!procesoId) return;
     const base = `riesgos:proceso:${procesoId}:page:1:size:50:causas:`;
@@ -125,24 +175,37 @@ export const getRiesgos = async (req: Request, res: Response) => {
         ]);
 
         const totalPages = total > 0 ? Math.ceil(total / take) : 0;
-        const data = riesgos.map((r: any) => ({
-            ...r,
-            tipoRiesgo: r.tipologiaTipo1Relacion?.nombre ?? null,
-            subtipoRiesgo: r.tipologiaTipo2Relacion?.nombre ?? null,
-            tipoRiesgoId: r.tipologiaTipo1Id ?? null,
-            subtipoRiesgoId: r.tipologiaTipo2Id ?? null,
-            // Calcular tipoGestion dinámicamente si no está presente
-            causas: (r.causas || []).map((c: any) => ({
-                ...c,
-                tipoGestion: c.tipoGestion || (
-                    (c.controles?.length > 0 && c.planesAccion?.length > 0) ? 'AMBOS' :
-                    c.controles?.length > 0 ? 'CONTROL' :
-                    c.planesAccion?.length > 0 ? 'PLAN' :
-                    c.puntajeTotal !== undefined ? 'CONTROL' : // Fallback: si tiene puntajeTotal, es un control
-                    null
-                )
-            }))
-        }));
+        
+        // Calcular calificacionGlobalImpacto para cada riesgo de forma asíncrona
+        const dataPromises = riesgos.map(async (r: any) => {
+            // Calcular calificacionGlobalImpacto del riesgo usando la función helper
+            const calificacionGlobalImpacto = r.evaluacion 
+                ? await calcularCalificacionGlobalImpacto(r.evaluacion)
+                : 1;
+            
+            return {
+                ...r,
+                tipoRiesgo: r.tipologiaTipo1Relacion?.nombre ?? null,
+                subtipoRiesgo: r.tipologiaTipo2Relacion?.nombre ?? null,
+                tipoRiesgoId: r.tipologiaTipo1Id ?? null,
+                subtipoRiesgoId: r.tipologiaTipo2Id ?? null,
+                // Calcular tipoGestion dinámicamente si no está presente
+                causas: (r.causas || []).map((c: any) => ({
+                    ...c,
+                    // Agregar calificacionGlobalImpacto del riesgo a cada causa
+                    calificacionGlobalImpacto: calificacionGlobalImpacto,
+                    tipoGestion: c.tipoGestion || (
+                        (c.controles?.length > 0 && c.planesAccion?.length > 0) ? 'AMBOS' :
+                        c.controles?.length > 0 ? 'CONTROL' :
+                        c.planesAccion?.length > 0 ? 'PLAN' :
+                        c.puntajeTotal !== undefined ? 'CONTROL' : // Fallback: si tiene puntajeTotal, es un control
+                        null
+                    )
+                }))
+            };
+        });
+        
+        const data = await Promise.all(dataPromises);
 
         const payload = {
             data,
@@ -246,12 +309,23 @@ export const getRiesgoById = async (req: Request, res: Response) => {
         });
 
         if (!riesgo) return res.status(404).json({ error: 'Riesgo not found' });
+        
+        // Calcular calificacionGlobalImpacto del riesgo usando la función helper
+        const calificacionGlobalImpacto = (riesgo as any).evaluacion
+            ? await calcularCalificacionGlobalImpacto((riesgo as any).evaluacion)
+            : 1;
+        
         const out = {
             ...riesgo,
             tipoRiesgo: (riesgo as any).tipologiaTipo1Relacion?.nombre ?? null,
             subtipoRiesgo: (riesgo as any).tipologiaTipo2Relacion?.nombre ?? null,
             tipoRiesgoId: (riesgo as any).tipologiaTipo1Id ?? null,
-            subtipoRiesgoId: (riesgo as any).tipologiaTipo2Id ?? null
+            subtipoRiesgoId: (riesgo as any).tipologiaTipo2Id ?? null,
+            // Agregar calificacionGlobalImpacto a cada causa
+            causas: ((riesgo as any).causas || []).map((c: any) => ({
+                ...c,
+                calificacionGlobalImpacto: calificacionGlobalImpacto
+            }))
         };
         await redisSet(cacheKey, out, 120);
         res.json(out);
