@@ -13,7 +13,7 @@ router.post(
   validateBody({
     nombre: { required: true, type: 'string', minLength: 2, maxLength: 200 },
     email: { required: true, type: 'string', minLength: 5, maxLength: 200 },
-    password: { required: false, type: 'string', minLength: 8, maxLength: 200 },
+    password: { required: false, type: 'string', minLength: 1, maxLength: 200, allowEmpty: true },
   }),
   createUsuario
 );

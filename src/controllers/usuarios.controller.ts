@@ -56,28 +56,35 @@ export const createUsuario = async (req: Request, res: Response) => {
     try {
         const { nombre, email, password, roleId, cargoId, activo } = req.body;
         
+        console.log('[createUsuario] Datos recibidos:', { nombre, email, roleId, cargoId, activo });
+        
         if (!roleId) {
+            console.log('[createUsuario] Error: roleId faltante');
             return res.status(400).json({ error: 'roleId is required' });
         }
         
         if (!nombre || !email) {
+            console.log('[createUsuario] Error: nombre o email faltante');
             return res.status(400).json({ error: 'nombre and email are required' });
         }
         const emailStr = String(email).trim();
-        if (!/^[^\s@]+@[^\s@]+(\.[^\s@]+)+$/.test(emailStr)) {
-            return res.status(400).json({ error: 'El correo no tiene un formato válido. Se aceptan dominios como .com, .co, .ce, .cl, .com.co, etc.' });
+        console.log('[createUsuario] Email a validar:', emailStr);
+        
+        // Validación simple: debe tener @ y al menos un punto después del @
+        if (!emailStr.includes('@') || !emailStr.split('@')[1]?.includes('.')) {
+            console.log('[createUsuario] Error: formato de email inválido');
+            return res.status(400).json({ error: 'El correo no tiene un formato válido' });
         }
         
-        // Obtener el código del rol para el campo role (string)
+        // Verificar que el rol existe
         const roleData = await prisma.role.findUnique({
             where: { id: Number(roleId) }
         });
         
         if (!roleData) {
+            console.log('[createUsuario] Error: rol no existe');
             return res.status(400).json({ error: `Role with ID ${roleId} does not exist` });
         }
-        
-        const roleCodigo = roleData.codigo;
         
         // Verificar que el cargo existe si se proporciona
         if (cargoId) {
@@ -86,6 +93,7 @@ export const createUsuario = async (req: Request, res: Response) => {
             });
             
             if (!cargoExists) {
+                console.log('[createUsuario] Error: cargo no existe');
                 return res.status(400).json({ error: `Cargo with ID ${cargoId} does not exist` });
             }
         }
@@ -93,11 +101,13 @@ export const createUsuario = async (req: Request, res: Response) => {
         const plainPassword = String(password || 'comware123');
         const hashedPassword = await hashPassword(plainPassword);
 
+        console.log('[createUsuario] Insertando usuario en BD');
         await prisma.$executeRaw`
-            INSERT INTO "Usuario" (nombre, email, password, role, "roleId", "cargoId", activo, "createdAt", "updatedAt")
-            VALUES (${nombre}, ${emailStr}, ${hashedPassword}, ${roleCodigo}, ${Number(roleId)}, ${cargoId ? Number(cargoId) : null}, ${activo ?? true}, NOW(), NOW())
+            INSERT INTO "Usuario" (nombre, email, password, "roleId", "cargoId", activo, "createdAt", "updatedAt")
+            VALUES (${nombre}, ${emailStr}, ${hashedPassword}, ${Number(roleId)}, ${cargoId ? Number(cargoId) : null}, ${activo ?? true}, NOW(), NOW())
         `;
 
+        console.log('[createUsuario] Usuario insertado, buscando datos...');
         const user = await prisma.usuario.findFirst({
             where: { email: emailStr },
             select: {
@@ -115,6 +125,7 @@ export const createUsuario = async (req: Request, res: Response) => {
             },
         });
         
+        console.log('[createUsuario] Usuario creado exitosamente');
         res.status(201).json(user);
     } catch (error: any) {
         res.status(500).json({ 
@@ -133,8 +144,9 @@ export const updateUsuario = async (req: Request, res: Response) => {
         if (nombre !== undefined) updateData.nombre = nombre;
         if (email !== undefined) {
             const emailStr = String(email).trim();
-            if (!/^[^\s@]+@[^\s@]+(\.[^\s@]+)+$/.test(emailStr)) {
-                return res.status(400).json({ error: 'El correo no tiene un formato válido. Se aceptan dominios como .com, .co, .ce, .cl, .com.co, etc.' });
+            // Validación simple: debe tener @ y al menos un punto después del @
+            if (!emailStr.includes('@') || !emailStr.split('@')[1]?.includes('.')) {
+                return res.status(400).json({ error: 'El correo no tiene un formato válido' });
             }
             updateData.email = emailStr;
         }
