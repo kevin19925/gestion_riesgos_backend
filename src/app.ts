@@ -31,7 +31,9 @@ const allowedOrigins = [
   'http://127.0.0.1:5173',
   'http://localhost:3000',
   'https://gestion-riesgos-app.onrender.com',
-  // Frontend productivo (por ejemplo https://erm.comware.com.ec)
+  'https://erm.comware.com.ec',
+  'https://api-erm.comware.com.ec',
+  // Frontend productivo desde variable de entorno
   process.env.CORS_ORIGIN,
 ].filter(Boolean) as string[];
 
