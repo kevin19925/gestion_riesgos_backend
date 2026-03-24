@@ -23,7 +23,7 @@ export const getProcesos = async (req: Request, res: Response) => {
                 responsableId: true,
                 areaId: true,
                 vicepresidencia: true,
-                gerencia: true,
+                gerenciaId: true,
                 estado: true,
                 activo: true,
                 analisis: true,
@@ -38,6 +38,13 @@ export const getProcesos = async (req: Request, res: Response) => {
                         id: true,
                         nombre: true,
                         email: true
+                    }
+                },
+                // OPTIMIZADO: Select específico para gerencia
+                gerencia: {
+                    select: {
+                        id: true,
+                        nombre: true
                     }
                 },
                 // OPTIMIZADO: Select específico para responsables múltiples
@@ -84,8 +91,8 @@ export const getProcesos = async (req: Request, res: Response) => {
             },
         });
         
-        // Mapear para agregar areaNombre y lista de responsables para facilitar uso en frontend
-        const procesosConAreaNombre = procesos.map(p => {
+        // Mapear para agregar areaNombre, gerenciaNombre y lista de responsables para facilitar uso en frontend
+        const procesosConAreaNombre = procesos.map((p: any) => {
             const responsablesList = (p.responsables || []).map((r: any) => {
                 const modo = r.modo !== undefined ? r.modo : null;
                 return {
@@ -100,6 +107,7 @@ export const getProcesos = async (req: Request, res: Response) => {
             return {
                 ...p,
                 areaNombre: p.area?.nombre || null,
+                gerenciaNombre: p.gerencia?.nombre || null,
                 responsablesList: responsablesList
             };
         });

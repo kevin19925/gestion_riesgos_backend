@@ -26,5 +26,3 @@ process.on('SIGTERM', () => {
         console.log('[SERVER] Servidor cerrado correctamente');
     });
 });
-
-

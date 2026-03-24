@@ -28,7 +28,8 @@ export const createControlRiesgo = async (req: Request, res: Response) => {
       descripcionControl,
       recomendacion,
       tipoMitigacion,
-      estadoAmbos
+      estadoAmbos,
+      planAccionVinculadoId
     } = req.body;
 
     // Validar que la causa existe
@@ -38,6 +39,17 @@ export const createControlRiesgo = async (req: Request, res: Response) => {
 
     if (!causa) {
       return res.status(404).json({ error: 'Causa de riesgo no encontrada' });
+    }
+
+    // Validar que el plan de acción existe si se proporciona
+    if (planAccionVinculadoId) {
+      const plan = await prisma.planAccion.findUnique({
+        where: { id: Number(planAccionVinculadoId) }
+      });
+
+      if (!plan) {
+        return res.status(404).json({ error: 'Plan de acción no encontrado' });
+      }
     }
 
     const control = await prisma.controlRiesgo.create({
@@ -61,6 +73,7 @@ export const createControlRiesgo = async (req: Request, res: Response) => {
         recomendacion,
         tipoMitigacion,
         estadoAmbos,
+        planAccionVinculadoId: planAccionVinculadoId ? Number(planAccionVinculadoId) : null,
         recalculadoEn: new Date()
       }
     });
@@ -97,7 +110,8 @@ export const updateControlRiesgo = async (req: Request, res: Response) => {
       descripcionControl,
       recomendacion,
       tipoMitigacion,
-      estadoAmbos
+      estadoAmbos,
+      planAccionVinculadoId
     } = req.body;
 
     // Verificar que el control existe
@@ -107,6 +121,17 @@ export const updateControlRiesgo = async (req: Request, res: Response) => {
 
     if (!controlExistente) {
       return res.status(404).json({ error: 'Control no encontrado' });
+    }
+
+    // Validar que el plan de acción existe si se proporciona
+    if (planAccionVinculadoId) {
+      const plan = await prisma.planAccion.findUnique({
+        where: { id: Number(planAccionVinculadoId) }
+      });
+
+      if (!plan) {
+        return res.status(404).json({ error: 'Plan de acción no encontrado' });
+      }
     }
 
     const control = await prisma.controlRiesgo.update({
@@ -132,6 +157,9 @@ export const updateControlRiesgo = async (req: Request, res: Response) => {
         ...(recomendacion !== undefined && { recomendacion }),
         ...(tipoMitigacion !== undefined && { tipoMitigacion }),
         ...(estadoAmbos !== undefined && { estadoAmbos }),
+        ...(planAccionVinculadoId !== undefined && { 
+          planAccionVinculadoId: planAccionVinculadoId ? Number(planAccionVinculadoId) : null 
+        }),
         recalculadoEn: new Date()
       }
     });
@@ -192,6 +220,17 @@ export const getControlesByCausa = async (req: Request, res: Response) => {
 
     const controles = await prisma.controlRiesgo.findMany({
       where: { causaRiesgoId: Number(causaRiesgoId) },
+      include: {
+        planAccionVinculado: {
+          select: {
+            id: true,
+            nombre: true,
+            descripcion: true,
+            estado: true,
+            responsable: true
+          }
+        }
+      },
       orderBy: { id: 'desc' }
     });
 
@@ -222,6 +261,17 @@ export const getControlById = async (req: Request, res: Response) => {
                 descripcion: true
               }
             }
+          }
+        },
+        planAccionVinculado: {
+          select: {
+            id: true,
+            nombre: true,
+            descripcion: true,
+            estado: true,
+            responsable: true,
+            fechaInicio: true,
+            fechaFin: true
           }
         }
       }

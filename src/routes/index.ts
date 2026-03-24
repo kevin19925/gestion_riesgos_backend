@@ -27,6 +27,7 @@ import configuracionResidualRoutes from './configuracionResidual.routes';
 import debugRoutes from './debug.routes';
 import auditRoutes from './audit.routes';
 import iaRoutes from './ia.routes';
+import reunionesIndividualRoutes from './reuniones-individual.routes';
 
 const router = Router();
 
@@ -85,5 +86,6 @@ if (process.env.NODE_ENV !== 'production') {
 }
 router.use('/audit', auditRoutes); // Sistema de auditoría
 router.use('/ia', iaRoutes); // IA (Responses API + Mongo)
+router.use('/reuniones', reunionesIndividualRoutes); // Rutas individuales de reuniones
 
 export default router;

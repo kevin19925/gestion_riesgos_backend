@@ -40,6 +40,8 @@ model Usuario {
   cargo                         Cargo?               @relation(fields: [cargoId], references: [id])
   roleRelacion                  Role                 @relation(fields: [roleId], references: [id], onDelete: NoAction, onUpdate: NoAction)
   procesosParticipantes         Proceso[]            @relation("Participantes")
+  asistenciasProceso            AsistentesProceso[]  @relation("AsistentesProceso")
+  asistenciasReunion            AsistenciaReunion[]  @relation("AsistenciaReunion")
 }
 
 model Cargo {
@@ -104,6 +106,8 @@ model Proceso {
   responsables                   ProcesoResponsable[]
   riesgos                        Riesgo[]
   participantes                  Usuario[]            @relation("Participantes")
+  asistentes                     AsistentesProceso[]
+  reuniones                      ReunionProceso[]
 
   @@index([gerenciaId])
 }
@@ -237,7 +241,7 @@ model CausaRiesgo {
 }
 
 model ControlRiesgo {
-  id                                  Int         @id @default(autoincrement())
+  id                                  Int          @id @default(autoincrement())
   causaRiesgoId                       Int
   descripcion                         String
   tipoControl                         String?
@@ -258,7 +262,11 @@ model ControlRiesgo {
   tipoMitigacion                      String?
   estadoAmbos                         String?
   recalculadoEn                       DateTime?
-  causaRiesgo                         CausaRiesgo @relation(fields: [causaRiesgoId], references: [id], onDelete: Cascade)
+  planAccionVinculadoId               Int?
+  causaRiesgo                         CausaRiesgo  @relation(fields: [causaRiesgoId], references: [id], onDelete: Cascade)
+  planAccionVinculado                 PlanAccion?  @relation("ControlVinculadoPlan", fields: [planAccionVinculadoId], references: [id])
+
+  @@index([planAccionVinculadoId])
 }
 
 model EvaluacionRiesgo {
@@ -301,32 +309,33 @@ model PriorizacionRiesgo {
 }
 
 model PlanAccion {
-  id               Int                 @id @default(autoincrement())
-  priorizacionId   Int?
-  riesgoId         Int?
-  incidenciaId     Int?
-  nombre           String?
-  objetivo         String?
-  descripcion      String
-  responsable      String?
-  fechaInicio      DateTime?
-  fechaFin         DateTime?
-  fechaProgramada  DateTime?
-  fechaEjecucion   DateTime?
-  estado           String
-  prioridad        Int?
-  presupuesto      Float?
-  porcentajeAvance Int?
-  observaciones    String?
-  createdAt        DateTime            @default(now())
-  updatedAt        DateTime            @updatedAt
-  causaRiesgoId    Int?
-  tipoGestion      String?
-  origenMigracion  Boolean?            @default(false)
-  causaRiesgo      CausaRiesgo?        @relation(fields: [causaRiesgoId], references: [id])
-  incidencia       Incidencia?         @relation(fields: [incidenciaId], references: [id])
-  priorizacion     PriorizacionRiesgo? @relation(fields: [priorizacionId], references: [id], onDelete: Cascade)
-  riesgo           Riesgo?             @relation(fields: [riesgoId], references: [id])
+  id                      Int                 @id @default(autoincrement())
+  priorizacionId          Int?
+  riesgoId                Int?
+  incidenciaId            Int?
+  nombre                  String?
+  objetivo                String?
+  descripcion             String
+  responsable             String?
+  fechaInicio             DateTime?
+  fechaFin                DateTime?
+  fechaProgramada         DateTime?
+  fechaEjecucion          DateTime?
+  estado                  String
+  prioridad               Int?
+  presupuesto             Float?
+  porcentajeAvance        Int?
+  observaciones           String?
+  createdAt               DateTime            @default(now())
+  updatedAt               DateTime            @updatedAt
+  causaRiesgoId           Int?
+  tipoGestion             String?
+  origenMigracion         Boolean?            @default(false)
+  causaRiesgo             CausaRiesgo?        @relation(fields: [causaRiesgoId], references: [id])
+  incidencia              Incidencia?         @relation(fields: [incidenciaId], references: [id])
+  priorizacion            PriorizacionRiesgo? @relation(fields: [priorizacionId], references: [id], onDelete: Cascade)
+  riesgo                  Riesgo?             @relation(fields: [riesgoId], references: [id])
+  controlesVinculados     ControlRiesgo[]     @relation("ControlVinculadoPlan")
 
   @@index([causaRiesgoId])
 }
@@ -772,3 +781,49 @@ model HistorialEstadoPlan {
   @@index([causaRiesgoId])
   @@index([estado])
 }
+
+model AsistentesProceso {
+  id        Int      @id @default(autoincrement())
+  procesoId Int
+  usuarioId Int
+  rol       String   @db.VarChar(50)
+  createdAt DateTime @default(now())
+  proceso   Proceso  @relation(fields: [procesoId], references: [id], onDelete: Cascade)
+  usuario   Usuario  @relation("AsistentesProceso", fields: [usuarioId], references: [id], onDelete: Cascade)
+
+  @@unique([procesoId, usuarioId])
+  @@index([procesoId])
+  @@index([usuarioId])
+}
+
+model ReunionProceso {
+  id          Int                  @id @default(autoincrement())
+  procesoId   Int
+  fecha       DateTime
+  descripcion String
+  estado      String               @default("programada") @db.VarChar(20)
+  createdAt   DateTime             @default(now())
+  updatedAt   DateTime             @default(now()) @updatedAt
+  proceso     Proceso              @relation(fields: [procesoId], references: [id], onDelete: Cascade)
+  asistencias AsistenciaReunion[]
+
+  @@index([procesoId])
+  @@index([fecha])
+  @@index([estado])
+}
+
+model AsistenciaReunion {
+  id            Int            @id @default(autoincrement())
+  reunionId     Int
+  usuarioId     Int
+  asistio       Boolean        @default(false)
+  observaciones String?
+  registradoEn  DateTime?
+  reunion       ReunionProceso @relation(fields: [reunionId], references: [id], onDelete: Cascade)
+  usuario       Usuario        @relation("AsistenciaReunion", fields: [usuarioId], references: [id], onDelete: Cascade)
+
+  @@unique([reunionId, usuarioId])
+  @@index([reunionId])
+  @@index([usuarioId])
+}
+
