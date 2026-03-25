@@ -152,6 +152,10 @@ export const createPlan = async (req: Request, res: Response) => {
       fechaInicio,
       fechaFin,
       fechaProgramada,
+      fechaFinalizacion,
+      seguimientoDetalle,
+      seguimientoEvidenciaUrl1,
+      seguimientoEvidenciaUrl2,
       estado = "Planeado",
       prioridad = 3,
       presupuesto,
@@ -187,6 +191,12 @@ export const createPlan = async (req: Request, res: Response) => {
         fechaProgramada: fechaProgramada
           ? new Date(fechaProgramada)
           : undefined,
+        ...(fechaFinalizacion
+          ? { fechaFinalizacion: new Date(fechaFinalizacion) }
+          : {}),
+        ...(seguimientoDetalle !== undefined && { seguimientoDetalle }),
+        ...(seguimientoEvidenciaUrl1 !== undefined && { seguimientoEvidenciaUrl1 }),
+        ...(seguimientoEvidenciaUrl2 !== undefined && { seguimientoEvidenciaUrl2 }),
         estado,
         prioridad: Number(prioridad),
         ...(presupuesto !== undefined && { presupuesto: Number(presupuesto) }),
@@ -218,6 +228,10 @@ export const updatePlan = async (req: Request, res: Response) => {
       fechaFin,
       fechaProgramada,
       fechaEjecucion,
+      fechaFinalizacion,
+      seguimientoDetalle,
+      seguimientoEvidenciaUrl1,
+      seguimientoEvidenciaUrl2,
       estado,
       prioridad,
       presupuesto,
@@ -228,24 +242,39 @@ export const updatePlan = async (req: Request, res: Response) => {
     const plan = await prisma.planAccion.update({
       where: { id: planId },
       data: {
-        ...(nombre && { nombre }),
-        ...(objetivo && { objetivo }),
-        ...(descripcion && { descripcion }),
-        ...(responsable && { responsable }),
+        ...(nombre !== undefined && { nombre }),
+        ...(objetivo !== undefined && { objetivo }),
+        // Permitir guardar cadena vacía (p. ej. usuario borró el texto); antes `descripcion &&` omitía el campo y no se persistía.
+        ...(descripcion !== undefined && { descripcion }),
+        ...(responsable !== undefined && { responsable }),
         ...(riesgoId !== undefined && { riesgoId: riesgoId != null ? Number(riesgoId) : null }),
         ...(incidenciaId !== undefined && { incidenciaId: incidenciaId != null ? Number(incidenciaId) : null }),
         ...(causaRiesgoId !== undefined && { causaRiesgoId: causaRiesgoId != null ? Number(causaRiesgoId) : null }),
-        ...(fechaInicio && { fechaInicio: new Date(fechaInicio) }),
-        ...(fechaFin && { fechaFin: new Date(fechaFin) }),
-        ...(fechaProgramada && { fechaProgramada: new Date(fechaProgramada) }),
-        ...(fechaEjecucion && { fechaEjecucion: new Date(fechaEjecucion) }),
+        ...(fechaInicio !== undefined && {
+          fechaInicio: fechaInicio ? new Date(fechaInicio) : null,
+        }),
+        ...(fechaFin !== undefined && {
+          fechaFin: fechaFin ? new Date(fechaFin) : null,
+        }),
+        ...(fechaProgramada !== undefined && {
+          fechaProgramada: fechaProgramada ? new Date(fechaProgramada) : null,
+        }),
+        ...(fechaEjecucion !== undefined && {
+          fechaEjecucion: fechaEjecucion ? new Date(fechaEjecucion) : null,
+        }),
+        ...(fechaFinalizacion !== undefined && {
+          fechaFinalizacion: fechaFinalizacion ? new Date(fechaFinalizacion) : null,
+        }),
+        ...(seguimientoDetalle !== undefined && { seguimientoDetalle }),
+        ...(seguimientoEvidenciaUrl1 !== undefined && { seguimientoEvidenciaUrl1 }),
+        ...(seguimientoEvidenciaUrl2 !== undefined && { seguimientoEvidenciaUrl2 }),
         ...(estado && { estado }),
         ...(prioridad !== undefined && { prioridad: Number(prioridad) }),
         ...(presupuesto !== undefined && { presupuesto: Number(presupuesto) }),
         ...(porcentajeAvance !== undefined && {
           porcentajeAvance: Number(porcentajeAvance),
         }),
-        ...(observaciones && { observaciones }),
+        ...(observaciones !== undefined && { observaciones }),
       },
     });
 

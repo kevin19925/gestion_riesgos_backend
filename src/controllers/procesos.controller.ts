@@ -401,6 +401,27 @@ export const updateProceso = async (req: Request, res: Response) => {
         if (contextoItems && Array.isArray(contextoItems)) {
             const validSignos = ['POSITIVO', 'NEGATIVO'];
             const validDofa = ['FORTALEZA', 'OPORTUNIDAD', 'DEBILIDAD', 'AMENAZA'];
+            const dofaDimensionDesdeTipoSigno = (item: any): string | null => {
+                const tipo = String(item.tipo ?? '')
+                    .toUpperCase()
+                    .normalize('NFD')
+                    .replace(/[\u0300-\u036f]/g, '');
+                const signo = String(item.signo ?? '').toUpperCase();
+                if (signo !== 'POSITIVO' && signo !== 'NEGATIVO') return null;
+                if (tipo.startsWith('INTERNO_')) return signo === 'POSITIVO' ? 'FORTALEZA' : 'DEBILIDAD';
+                if (tipo.startsWith('EXTERNO_')) return signo === 'POSITIVO' ? 'OPORTUNIDAD' : 'AMENAZA';
+                const internoSolo = new Set([
+                    'FINANCIEROS', 'GENTE', 'PROCESOS', 'ACTIVOSFISICOS', 'CADENASUMINISTRO',
+                    'INFORMACION', 'SISTEMAS', 'PROYECTOS', 'IMPUESTOS', 'GRUPOSINTERESINTERNOS'
+                ]);
+                const externoSolo = new Set([
+                    'ECONOMICO', 'CULTURALSOCIAL', 'LEGALREGULATORIO', 'TECNOLOGICO', 'AMBIENTAL',
+                    'GRUPOSINTERESEXTERNOS', 'POLITICO', 'MEGATENDENCIAS', 'OTROSFACTORES'
+                ]);
+                if (internoSolo.has(tipo)) return signo === 'POSITIVO' ? 'FORTALEZA' : 'DEBILIDAD';
+                if (externoSolo.has(tipo)) return signo === 'POSITIVO' ? 'OPORTUNIDAD' : 'AMENAZA';
+                return null;
+            };
             const items = contextoItems
                 .filter((item: any) => item && item.tipo && validSignos.includes(String(item.signo).toUpperCase()) && item.descripcion != null)
                 .map((item: any) => {
@@ -410,9 +431,13 @@ export const updateProceso = async (req: Request, res: Response) => {
                         signo: String(item.signo).toUpperCase(),
                         descripcion: String(item.descripcion)
                     };
-                    if (item.enviarADofa === true && item.dofaDimension && validDofa.includes(String(item.dofaDimension).toUpperCase())) {
+                    // Solo exclusión explícita; null/undefined/filas viejas con default false en BD deben poder sincronizar
+                    const incluirDofa = item.enviarADofa !== false;
+                    const dim =
+                        (item.dofaDimension && String(item.dofaDimension)) || dofaDimensionDesdeTipoSigno(item);
+                    if (incluirDofa && dim && validDofa.includes(String(dim).toUpperCase())) {
                         payload.enviarADofa = true;
-                        payload.dofaDimension = String(item.dofaDimension).toUpperCase();
+                        payload.dofaDimension = String(dim).toUpperCase();
                     }
                     return payload;
                 });

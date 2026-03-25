@@ -333,6 +333,11 @@ model PlanAccion {
   presupuesto             Float?
   porcentajeAvance        Int?
   observaciones           String?
+  /// Fecha real de cierre del plan (habilita seguimiento: detalle + evidencias)
+  fechaFinalizacion       DateTime?
+  seguimientoDetalle      String?
+  seguimientoEvidenciaUrl1 String?
+  seguimientoEvidenciaUrl2 String?
   createdAt               DateTime            @default(now())
   updatedAt               DateTime            @updatedAt
   causaRiesgoId           Int?

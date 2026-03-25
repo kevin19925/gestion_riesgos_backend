@@ -52,7 +52,7 @@ async function getMongo() {
 
 // --- Helper Functions ---
 
-async function getRiesgosResumen(userId: number) {
+async function getRiesgosResumen(userId: number, takeRows = 100) {
   const asignaciones = await prisma.procesoResponsable.findMany({
     where: { usuarioId: userId, modo: { in: ['director', 'proceso'] } },
     select: { procesoId: true },
@@ -77,7 +77,7 @@ async function getRiesgosResumen(userId: number) {
         },
       },
     },
-    take: 100,
+    take: takeRows,
   });
 
   return riesgos.map((r) => {
@@ -153,7 +153,48 @@ async function getProcesosResumen(userId: number) {
 const CONTROLES_TAKE = 500;
 const PLANES_TAKE = 500;
 
-async function getControlesResumen(userId: number): Promise<{ lines: string[]; total: number }> {
+/** Salida: equilibrio calidad/velocidad (subir con IA_STREAM_MAX_OUTPUT_TOKENS si hace falta más texto). */
+const IA_STREAM_MAX_OUTPUT = Math.min(
+  900,
+  Math.max(256, Number(process.env.IA_STREAM_MAX_OUTPUT_TOKENS) || 580),
+);
+
+/**
+ * Límites con pantalla activa: sigue habiendo vista global (planes/controles por riesgo-proceso en BD),
+ * sin ir a 500+500 en cada mensaje. `planesResumen` del front complementa el proceso abierto.
+ */
+function getContextoIATakes(screenContext?: ScreenContext): {
+  riesgosTake: number;
+  controlesTake: number;
+  planesTake: number;
+  skipContextoInterno: boolean;
+} {
+  if (!screenContext) {
+    return {
+      riesgosTake: 100,
+      controlesTake: CONTROLES_TAKE,
+      planesTake: PLANES_TAKE,
+      skipContextoInterno: false,
+    };
+  }
+  if (screenContext.module === 'planes') {
+    const sc = screenContext.screen;
+    if (sc === 'controles') {
+      return { riesgosTake: 100, controlesTake: 300, planesTake: 260, skipContextoInterno: false };
+    }
+    if (sc === 'planes') {
+      return { riesgosTake: 100, controlesTake: 220, planesTake: 380, skipContextoInterno: false };
+    }
+    return { riesgosTake: 90, controlesTake: 220, planesTake: 220, skipContextoInterno: false };
+  }
+  return { riesgosTake: 80, controlesTake: 320, planesTake: 320, skipContextoInterno: false };
+}
+
+async function getControlesResumen(
+  userId: number,
+  take: number = CONTROLES_TAKE,
+): Promise<{ lines: string[]; total: number }> {
+  if (take <= 0) return { lines: [], total: 0 };
   const asignaciones = await prisma.procesoResponsable.findMany({
     where: { usuarioId: userId, modo: { in: ['director', 'proceso'] } },
     select: { procesoId: true }
@@ -178,7 +219,7 @@ async function getControlesResumen(userId: number): Promise<{ lines: string[]; t
           },
         },
       },
-      take: CONTROLES_TAKE,
+      take,
     }),
   ]);
   const lines = controles.map(c => {
@@ -193,7 +234,11 @@ async function getControlesResumen(userId: number): Promise<{ lines: string[]; t
   return { lines, total };
 }
 
-async function getPlanesResumen(userId: number): Promise<{ lines: string[]; total: number }> {
+async function getPlanesResumen(
+  userId: number,
+  take: number = PLANES_TAKE,
+): Promise<{ lines: string[]; total: number }> {
+  if (take <= 0) return { lines: [], total: 0 };
   const asignaciones = await prisma.procesoResponsable.findMany({
     where: { usuarioId: userId, modo: { in: ['director', 'proceso'] } },
     select: { procesoId: true },
@@ -230,7 +275,7 @@ async function getPlanesResumen(userId: number): Promise<{ lines: string[]; tota
           },
         },
       },
-      take: PLANES_TAKE,
+      take,
     }),
   ]);
 
@@ -289,6 +334,38 @@ async function buildScreenContextMessage(screenContext: ScreenContext | undefine
   contextMessage += `Módulo: ${module}\n`;
   contextMessage += `Pantalla: ${screen}\n`;
   contextMessage += `Acción: ${action === 'create' ? 'Creando nuevo' : action === 'edit' ? 'Editando' : 'Visualizando'}\n`;
+  if (formData?.procesoSigla || formData?.procesoNombre) {
+    contextMessage += `Proceso en pantalla: ${[formData.procesoSigla, formData.procesoNombre].filter(Boolean).join(' — ')}\n`;
+  }
+  if (processId != null) {
+    contextMessage += `ID proceso (sistema): ${processId}\n`;
+  }
+  contextMessage += `\nInstrucción: Este bloque describe la pantalla y el proceso abierto. El sistema también envía listas globales RIESGOS, CONTROLES y PLANES (BD). `;
+  contextMessage += `Úsalas juntas: lo de abajo (planesResumen / controles visibles) es el detalle del proceso actual; los bloques globales permiten comparar por riesgo/proceso.\n`;
+
+  // Planes de acción reales del proceso (todas las pestañas del módulo planes)
+  if (
+    module === 'planes' &&
+    formData?.planesResumen &&
+    Array.isArray(formData.planesResumen) &&
+    formData.planesResumen.length > 0
+  ) {
+    contextMessage += `\n=== PLANES DE ACCIÓN REGISTRADOS EN ESTE PROCESO (datos reales de la aplicación) ===\n`;
+    contextMessage += `REGLA: Para preguntas sobre planes por riesgo (ej. 1GTI), usa EXCLUSIVAMENTE esta lista. `;
+    contextMessage += `Si un riesgo aparece aquí con uno o más planes, NO digas que no hay planes registrados.\n\n`;
+    formData.planesResumen.forEach((r: any, idx: number) => {
+      if (idx >= 40) return;
+      contextMessage += `\nRiesgo ${r.riesgoId}: ${r.riesgoDescripcion || '(sin descripción)'}\n`;
+      (r.planes || []).forEach((p: any, j: number) => {
+        contextMessage += `  ${j + 1}. Causa: ${p.causaOriginal || '(sin causa)'}\n`;
+        contextMessage += `     Descripción del plan: ${p.planDescripcion || '(sin descripción)'}\n`;
+        contextMessage += `     Detalle: ${p.planDetalle || '(n/a)'}\n`;
+        contextMessage += `     Responsable: ${p.responsable || '(no definido)'}\n`;
+        contextMessage += `     Fecha estimada: ${p.fechaEstimada ?? 'N/A'}\n`;
+        contextMessage += `     Estado: ${p.estado || '(n/a)'}\n`;
+      });
+    });
+  }
 
   // Información específica según el módulo
   if (module === 'planes' && screen === 'planes') {
@@ -343,10 +420,10 @@ async function buildScreenContextMessage(screenContext: ScreenContext | undefine
       contextMessage += `El usuario está viendo la lista de controles. Puede preguntarte sobre cualquiera de ellos.\n\n`;
       contextMessage += `=== CONTROLES VISIBLES EN PANTALLA ===\n`;
       formData.controlesVisibles.forEach((r: any, idx: number) => {
-        if (idx < 3) { // Solo mostrar los primeros 3 riesgos para no saturar
+        if (idx < 10) {
           contextMessage += `\nRiesgo ${r.riesgoId}: ${r.riesgoDescripcion}\n`;
           r.controles.forEach((c: any, cidx: number) => {
-            if (cidx < 2) { // Solo 2 controles por riesgo
+            if (cidx < 5) {
               contextMessage += `  - Control: ${c.descripcion} (Tipo: ${c.tipo}, Efectividad: ${c.efectividad})\n`;
             }
           });
@@ -824,38 +901,60 @@ async function getContextoInternoResumen(userId: number, mensaje: string) {
 
 type ControlesPlanesContext = { lines: string[]; total: number };
 
-/** Obtiene riesgos, procesos, controles y planes para el usuario. Usa Redis si está disponible. */
-async function getContextoIA(userId: number, message: string): Promise<{
+/** Obtiene riesgos, procesos, controles y planes para el usuario. Usa Redis si está disponible (sin screenContext). */
+async function getContextoIA(
+  userId: number,
+  message: string,
+  screenContext?: ScreenContext,
+): Promise<{
   riesgos: string[];
   procesos: string[];
   controles: ControlesPlanesContext;
   planes: ControlesPlanesContext;
   contextoInterno: string | null;
 }> {
+  const takes = getContextoIATakes(screenContext);
   const cacheKey = `${IA_CONTEXT_CACHE_PREFIX}${userId}`;
-  const cached = await redisGet<{ riesgos: string[]; procesos: string[]; controles: ControlesPlanesContext; planes: ControlesPlanesContext }>(cacheKey);
 
   let riesgos: string[];
   let procesos: string[];
   let controles: ControlesPlanesContext;
   let planes: ControlesPlanesContext;
 
-  if (cached) {
-    riesgos = cached.riesgos;
-    procesos = cached.procesos;
-    controles = cached.controles;
-    planes = cached.planes;
+  if (!screenContext) {
+    const cached = await redisGet<{
+      riesgos: string[];
+      procesos: string[];
+      controles: ControlesPlanesContext;
+      planes: ControlesPlanesContext;
+    }>(cacheKey);
+
+    if (cached) {
+      riesgos = cached.riesgos;
+      procesos = cached.procesos;
+      controles = cached.controles;
+      planes = cached.planes;
+    } else {
+      [riesgos, procesos, controles, planes] = await Promise.all([
+        getRiesgosResumen(userId, takes.riesgosTake),
+        getProcesosResumen(userId),
+        getControlesResumen(userId, takes.controlesTake),
+        getPlanesResumen(userId, takes.planesTake),
+      ]);
+      await redisSet(cacheKey, { riesgos, procesos, controles, planes }, IA_CONTEXT_CACHE_TTL);
+    }
   } else {
     [riesgos, procesos, controles, planes] = await Promise.all([
-      getRiesgosResumen(userId),
+      getRiesgosResumen(userId, takes.riesgosTake),
       getProcesosResumen(userId),
-      getControlesResumen(userId),
-      getPlanesResumen(userId),
+      getControlesResumen(userId, takes.controlesTake),
+      getPlanesResumen(userId, takes.planesTake),
     ]);
-    await redisSet(cacheKey, { riesgos, procesos, controles, planes }, IA_CONTEXT_CACHE_TTL);
   }
 
-  const contextoInterno = await getContextoInternoResumen(userId, message);
+  const contextoInterno = takes.skipContextoInterno
+    ? null
+    : await getContextoInternoResumen(userId, message);
   return { riesgos, procesos, controles, planes, contextoInterno };
 }
 
@@ -896,54 +995,48 @@ export async function procesarMensajeIA(payload: IAUserMessagePayload): Promise<
     content: `USUARIO_ACTUAL:\nNombre: ${nombreReal}\nRol: ${rolReal}\nCargo: ${cargoReal || 'No especificado'}\nUsa siempre estos valores al responder. No escribas {{nombre_usuario}}, {{rol}} ni {{cargo}}.`,
   });
 
-  if (numericUserId > 0) {
-    const { riesgos, procesos, controles, planes, contextoInterno } = await getContextoIA(numericUserId, message);
-
-    if (riesgos.length) contextoData.push({ role: 'developer', content: 'RIESGOS:\n' + riesgos.join('\n') });
-    if (procesos.length) contextoData.push({ role: 'developer', content: 'PROCESOS:\n' + procesos.join('\n') });
-    
-    // NUEVO: Solo enviar bloque CONTROLES general si NO estamos en la pantalla de controles
-    const enPantallaControles = screenContext?.module === 'planes' && screenContext?.screen === 'controles';
-    console.log('[IA] Verificando pantalla de controles:', { 
-      enPantallaControles, 
-      module: screenContext?.module, 
-      screen: screenContext?.screen 
-    }); // DEBUG
-    
-    if (!enPantallaControles && (controles.lines?.length || controles.total > 0)) {
-      console.log('[IA] ENVIANDO bloque CONTROLES general'); // DEBUG
-      contextoData.push({
-        role: 'developer',
-        content: `CONTROLES:\nTotal en el sistema: ${controles.total} controles.\n${controles.lines?.join('\n') ?? ''}`,
-      });
-    } else if (enPantallaControles) {
-      console.log('[IA] OMITIENDO bloque CONTROLES general (usuario en pantalla de controles)'); // DEBUG
-    }
-    
-    // NUEVO: Solo enviar bloque PLANES general si NO estamos en la pantalla de planes
-    const enPantallaPlanes = screenContext?.module === 'planes' && screenContext?.screen === 'planes';
-    if (!enPantallaPlanes && (planes.lines?.length || planes.total > 0)) {
-      contextoData.push({
-        role: 'developer',
-        content: `PLANES:\nTotal en el sistema: ${planes.total} planes de acción.\n${planes.lines?.join('\n') ?? ''}`,
-      });
-    }
-    
-    if (contextoInterno) contextoData.push({ role: 'developer', content: 'CONTEXTO_INTERNO:\n' + contextoInterno });
-  }
-
-  // NUEVO: Contexto de pantalla
+  // Pantalla primero: el modelo sabe dónde está y qué proceso mira antes del volumen global
   if (screenContext) {
     const screenContextMessage = await buildScreenContextMessage(screenContext);
     if (screenContextMessage) {
-      console.log('[IA] ===== CONTEXTO DE PANTALLA DETECTADO =====');
-      console.log(screenContextMessage);
-      console.log('[IA] ================================================');
       contextoData.push({
         role: 'developer',
         content: screenContextMessage,
       });
     }
+  }
+
+  if (numericUserId > 0) {
+    const { riesgos, procesos, controles, planes, contextoInterno } = await getContextoIA(
+      numericUserId,
+      message,
+      screenContext,
+    );
+
+    if (riesgos.length) contextoData.push({ role: 'developer', content: 'RIESGOS:\n' + riesgos.join('\n') });
+    if (procesos.length) contextoData.push({ role: 'developer', content: 'PROCESOS:\n' + procesos.join('\n') });
+
+    if (controles.lines?.length || controles.total > 0) {
+      contextoData.push({
+        role: 'developer',
+        content:
+          `CONTROLES (vista global en BD; asociados a riesgo y proceso):\n` +
+          `Total en el sistema: ${controles.total} controles.\n` +
+          `${controles.lines?.join('\n') ?? ''}`,
+      });
+    }
+
+    if (planes.lines?.length || planes.total > 0) {
+      contextoData.push({
+        role: 'developer',
+        content:
+          `PLANES (tabla PlanAccion; vista global por riesgo/proceso):\n` +
+          `Total en el sistema: ${planes.total} planes de acción.\n` +
+          `${planes.lines?.join('\n') ?? ''}`,
+      });
+    }
+
+    if (contextoInterno) contextoData.push({ role: 'developer', content: 'CONTEXTO_INTERNO:\n' + contextoInterno });
   }
 
   try {
@@ -1022,8 +1115,8 @@ async function generarRespuestaConResponses(opts: {
       } as any),
     },
     input,
-    max_output_tokens: 600,
-    temperature: 0.5,
+    max_output_tokens: IA_STREAM_MAX_OUTPUT,
+    temperature: 0.35,
   });
 
   // La SDK agrega output_text con todo el texto generado
@@ -1086,57 +1179,50 @@ export async function procesarMensajeIAStream(
     content: `USUARIO_ACTUAL:\nNombre: ${nombreReal}\nRol: ${rolReal}\nCargo: ${cargoReal || 'No especificado'}\nUsa siempre estos valores al responder. No escribas {{nombre_usuario}}, {{rol}} ni {{cargo}}.`,
   });
 
-  if (numericUserId > 0) {
-    const { riesgos, procesos, controles, planes, contextoInterno } = await getContextoIA(numericUserId, message);
-
-    if (riesgos.length)
-      contextoData.push({ role: 'developer', content: 'RIESGOS:\n' + riesgos.join('\n') });
-    if (procesos.length)
-      contextoData.push({ role: 'developer', content: 'PROCESOS:\n' + procesos.join('\n') });
-    
-    // NUEVO: Solo enviar bloque CONTROLES general si NO estamos en la pantalla de controles
-    const enPantallaControles = screenContext?.module === 'planes' && screenContext?.screen === 'controles';
-    console.log('[IA] [stream] Verificando pantalla de controles:', { 
-      enPantallaControles, 
-      module: screenContext?.module, 
-      screen: screenContext?.screen 
-    }); // DEBUG
-    
-    if (!enPantallaControles && (controles.lines?.length || controles.total > 0)) {
-      console.log('[IA] [stream] ENVIANDO bloque CONTROLES general'); // DEBUG
-      contextoData.push({
-        role: 'developer',
-        content: `CONTROLES:\nTotal en el sistema: ${controles.total} controles.\n${controles.lines?.join('\n') ?? ''}`,
-      });
-    } else if (enPantallaControles) {
-      console.log('[IA] [stream] OMITIENDO bloque CONTROLES general (usuario en pantalla de controles)'); // DEBUG
-    }
-    
-    // NUEVO: Solo enviar bloque PLANES general si NO estamos en la pantalla de planes
-    const enPantallaPlanes = screenContext?.module === 'planes' && screenContext?.screen === 'planes';
-    if (!enPantallaPlanes && (planes.lines?.length || planes.total > 0)) {
-      contextoData.push({
-        role: 'developer',
-        content: `PLANES:\nTotal en el sistema: ${planes.total} planes de acción.\n${planes.lines?.join('\n') ?? ''}`,
-      });
-    }
-    
-    if (contextoInterno)
-      contextoData.push({ role: 'developer', content: 'CONTEXTO_INTERNO:\n' + contextoInterno });
-  }
-
-  // NUEVO: Contexto de pantalla
   if (screenContext) {
     const screenContextMessage = await buildScreenContextMessage(screenContext);
     if (screenContextMessage) {
-      console.log('[IA] [stream] ===== CONTEXTO DE PANTALLA DETECTADO =====');
-      console.log(screenContextMessage);
-      console.log('[IA] [stream] ================================================');
       contextoData.push({
         role: 'developer',
         content: screenContextMessage,
       });
     }
+  }
+
+  if (numericUserId > 0) {
+    const { riesgos, procesos, controles, planes, contextoInterno } = await getContextoIA(
+      numericUserId,
+      message,
+      screenContext,
+    );
+
+    if (riesgos.length)
+      contextoData.push({ role: 'developer', content: 'RIESGOS:\n' + riesgos.join('\n') });
+    if (procesos.length)
+      contextoData.push({ role: 'developer', content: 'PROCESOS:\n' + procesos.join('\n') });
+
+    if (controles.lines?.length || controles.total > 0) {
+      contextoData.push({
+        role: 'developer',
+        content:
+          `CONTROLES (vista global en BD; asociados a riesgo y proceso):\n` +
+          `Total en el sistema: ${controles.total} controles.\n` +
+          `${controles.lines?.join('\n') ?? ''}`,
+      });
+    }
+
+    if (planes.lines?.length || planes.total > 0) {
+      contextoData.push({
+        role: 'developer',
+        content:
+          `PLANES (tabla PlanAccion; vista global por riesgo/proceso):\n` +
+          `Total en el sistema: ${planes.total} planes de acción.\n` +
+          `${planes.lines?.join('\n') ?? ''}`,
+      });
+    }
+
+    if (contextoInterno)
+      contextoData.push({ role: 'developer', content: 'CONTEXTO_INTERNO:\n' + contextoInterno });
   }
 
   try {
@@ -1171,8 +1257,8 @@ export async function procesarMensajeIAStream(
         } as any),
       },
       input,
-      max_output_tokens: 600,
-      temperature: 0.5,
+      max_output_tokens: IA_STREAM_MAX_OUTPUT,
+      temperature: 0.35,
     });
 
     let fullAnswer = '';
