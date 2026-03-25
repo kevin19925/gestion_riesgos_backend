@@ -117,10 +117,11 @@ export const postChatIAStream = async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'El campo message es requerido' });
     }
 
-    // Configuramos cabeceras SSE
+    // Configuramos cabeceras SSE (X-Accel-Buffering: no evita que nginx acumule toda la respuesta)
     res.setHeader('Content-Type', 'text/event-stream');
-    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Cache-Control', 'no-cache, no-transform');
     res.setHeader('Connection', 'keep-alive');
+    res.setHeader('X-Accel-Buffering', 'no');
     res.flushHeaders?.();
 
     let finished = false;
@@ -150,19 +151,19 @@ export const postChatIAStream = async (req: Request, res: Response) => {
       },
     )
       .then((result) => {
-        finished = true;
         sendEvent('end', {
           conversationId: result.conversationId,
         });
+        finished = true;
         res.end();
       })
       .catch((error: any) => {
         console.error('[IA] Error crítico en postChatIAStream:', error);
-        finished = true;
         sendEvent('error', {
           error: 'Error al procesar el mensaje de IA',
           message: error?.message || 'Error desconocido',
         });
+        finished = true;
         res.end();
       });
   } catch (error: any) {

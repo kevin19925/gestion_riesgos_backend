@@ -1268,7 +1268,9 @@ export async function procesarMensajeIAStream(
     }
 
     for await (const event of stream as AsyncIterable<{ type?: string; delta?: string }>) {
-      if (event?.type === 'response.output_text.delta') {
+      const t = (event as { type?: string })?.type;
+      // Texto del asistente (Responses API). No usar .endsWith('.delta') genérico: hay otros deltas (p. ej. reasoning).
+      if (t === 'response.output_text.delta' || t === 'response.text.delta') {
         const delta: string = (event as { delta?: string }).delta ?? '';
         if (delta) {
           fullAnswer += delta;
