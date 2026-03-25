@@ -159,6 +159,7 @@ model Normatividad {
   riesgoIdentificado    String?
   clasificacion         String?
   comentarios           String?
+  responsable           String?
   createdAt             DateTime @default(now())
   updatedAt             DateTime @updatedAt
   proceso               Proceso  @relation(fields: [procesoId], references: [id], onDelete: Cascade)

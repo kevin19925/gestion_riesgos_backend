@@ -15,6 +15,7 @@ export const cambiarEstadoPlan = async (req: Request, res: Response) => {
   try {
     const causaId = Number(req.params.id);
     const { estado, observacion } = req.body;
+    const user = (req as any).user;
 
     // Validar estado
     const estadosValidos = ['pendiente', 'en_revision', 'revisado', 'PENDIENTE', 'EN_REVISION', 'REVISADO', 'EN_PROGRESO', 'COMPLETADO'];
@@ -47,6 +48,41 @@ export const cambiarEstadoPlan = async (req: Request, res: Response) => {
     }
 
     const estadoAnterior = plan.estado;
+    const estadoNormalizado = estado.toLowerCase();
+    const estadoAnteriorNormalizado = estadoAnterior.toLowerCase();
+
+    // VALIDACIONES DE ROLES PARA CAMBIO DE ESTADO
+    const userRole = user?.role?.toLowerCase() || '';
+
+    // Validación 1: Solo SUPERVISOR puede cambiar de "pendiente" a "en_revision" (revisado)
+    if (estadoAnteriorNormalizado === 'pendiente' && estadoNormalizado === 'en_revision') {
+      if (userRole !== 'supervisor') {
+        return res.status(403).json({
+          error: 'Permiso denegado',
+          message: 'Solo el Supervisor puede cambiar el estado de Pendiente a Revisado'
+        });
+      }
+    }
+
+    // Validación 2: Solo GERENTE puede cambiar de "en_revision" (revisado) a "revisado" (aprobado)
+    if (estadoAnteriorNormalizado === 'en_revision' && estadoNormalizado === 'revisado') {
+      if (userRole !== 'gerente' && userRole !== 'gerente_general' && userRole !== 'manager') {
+        return res.status(403).json({
+          error: 'Permiso denegado',
+          message: 'Solo el Gerente puede cambiar el estado de Revisado a Aprobado'
+        });
+      }
+    }
+
+    // Validación 3: GERENTE NO puede volver a "pendiente" desde "en_revision"
+    if (estadoAnteriorNormalizado === 'en_revision' && estadoNormalizado === 'pendiente') {
+      if (userRole === 'gerente' || userRole === 'gerente_general' || userRole === 'manager') {
+        return res.status(403).json({
+          error: 'Permiso denegado',
+          message: 'El Gerente no puede devolver planes a estado Pendiente'
+        });
+      }
+    }
 
     // Actualizar estado del plan
     const planActualizado = await prisma.planAccion.update({
@@ -75,7 +111,6 @@ export const cambiarEstadoPlan = async (req: Request, res: Response) => {
     });
 
     // Registrar en historial de eventos
-    const user = (req as any).user;
     await prisma.historialEvento.create({
       data: {
         usuarioId: user?.userId || user?.id,

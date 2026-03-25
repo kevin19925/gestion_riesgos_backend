@@ -229,7 +229,8 @@ export const getProcesoById = async (req: Request, res: Response) => {
                         detalleIncumplimiento: true,
                         riesgoIdentificado: true,
                         clasificacion: true,
-                        comentarios: true
+                        comentarios: true,
+                        responsable: true
                     } 
                 },
                 contextos: { select: { id: true, tipo: true, descripcion: true } },
@@ -381,7 +382,8 @@ export const updateProceso = async (req: Request, res: Response) => {
                     detalleIncumplimiento: item.detalleIncumplimiento,
                     riesgoIdentificado: item.riesgoIdentificado,
                     clasificacion: item.clasificacion,
-                    comentarios: item.comentarios
+                    comentarios: item.comentarios,
+                    responsable: item.responsable
                 }))
             };
         }

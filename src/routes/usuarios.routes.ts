@@ -5,7 +5,7 @@ import { validateBody, validateNumericIdParam } from '../middleware/validation';
 
 const router = Router();
 
-router.get('/', requireRoles(['admin']), getUsuarios);
+router.get('/', requireRoles(['admin', 'supervisor_riesgos', 'dueño_procesos', 'gerente_general']), getUsuarios);
 router.get('/:id', requireRoles(['admin']), validateNumericIdParam('id'), getUsuarioById);
 router.post(
   '/',
