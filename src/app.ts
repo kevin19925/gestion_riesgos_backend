@@ -26,15 +26,20 @@ app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
 // CORS Configuration
+const extraOrigins = (process.env.CORS_ORIGINS || '')
+  .split(',')
+  .map((s) => s.trim())
+  .filter(Boolean);
 const allowedOrigins = [
   'http://localhost:5173',
   'http://127.0.0.1:5173',
   'http://localhost:3000',
   'https://gestion-riesgos-app.onrender.com',
   'https://erm.comware.com.ec',
+  'https://www.erm.comware.com.ec',
   'https://api-erm.comware.com.ec',
-  // Frontend productivo desde variable de entorno
   process.env.CORS_ORIGIN,
+  ...extraOrigins,
 ].filter(Boolean) as string[];
 
 app.use(
@@ -47,18 +52,32 @@ app.use(
         return callback(null, true);
       }
 
-      // En caso de origen no permitido, devolver error explícito
-      return callback(new Error(`CORS: Origin ${origin} not allowed`));
+      // Nunca pasar Error a callback: Express puede responder sin cabeceras CORS y el
+      // navegador muestra solo "blocked by CORS" en lugar del motivo real.
+      if (process.env.NODE_ENV !== 'production') {
+        console.warn('[CORS] Origen no permitido:', origin);
+      }
+      return callback(null, false);
     },
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization'],
+    allowedHeaders: [
+      'Content-Type',
+      'Authorization',
+      'Accept',
+      'Origin',
+      'X-Requested-With',
+    ],
+    optionsSuccessStatus: 204,
   }),
 );
 
 // Enhanced Security Headers
 app.use(
   helmet({
+    // Por defecto Helmet envía Cross-Origin-Resource-Policy: same-origin, lo que bloquea
+    // fetch/XHR desde otro host (ej. erm.… → api-erm.…). El navegador suele mostrarlo como CORS.
+    crossOriginResourcePolicy: { policy: 'cross-origin' },
     contentSecurityPolicy: {
       directives: {
         defaultSrc: ["'self'"],

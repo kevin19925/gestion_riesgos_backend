@@ -21,6 +21,11 @@ export function authMiddleware(options?: { required?: boolean; publicPaths?: str
   const publicPaths = options?.publicPaths ?? DEFAULT_PUBLIC_PATHS;
 
   return (req: Request, res: Response, next: NextFunction) => {
+    // Preflight CORS: sin Authorization; debe pasar sin401 (cors() ya responde OPTIONS en la mayoría de casos).
+    if (req.method === 'OPTIONS') {
+      return next();
+    }
+
     const path = req.originalUrl?.split('?')[0] || req.path;
     if (required && isPublicPath(path, req.method, publicPaths)) {
       return next();
