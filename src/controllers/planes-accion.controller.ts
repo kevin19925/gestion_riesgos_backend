@@ -1,5 +1,29 @@
 import { Request, Response } from "express";
 import prisma from "../prisma";
+import {
+  getUiCamposHabilitacionFlags,
+  UI_CAMPO_PLAN_FECHA_ESTIMADA_FINALIZACION,
+  UI_CAMPO_PLAN_FECHA_FINALIZACION,
+} from "../services/uiCamposHabilitacion.service";
+
+function ymd(input: unknown): string | null {
+  if (input == null || input === "") return null;
+  if (input instanceof Date) return input.toISOString().slice(0, 10);
+  const s = String(input);
+  if (s.includes("T")) return s.split("T")[0].slice(0, 10);
+  return s.slice(0, 10);
+}
+
+function strNorm(v: unknown): string {
+  if (v == null) return "";
+  return String(v).trim();
+}
+
+const FIELD_LOCKED = {
+  error:
+    "Este dato no puede modificarse: está deshabilitado por el administrador del sistema.",
+  code: "FIELD_LOCKED",
+} as const;
 
 /**
  * PLANES DE ACCIÓN CONTROLLER
@@ -177,6 +201,22 @@ export const createPlan = async (req: Request, res: Response) => {
       });
     }
 
+    const flags = await getUiCamposHabilitacionFlags();
+    const hasFechaEst =
+      Boolean(fechaFin && String(fechaFin).trim()) ||
+      Boolean(fechaProgramada && String(fechaProgramada).trim());
+    if (!flags[UI_CAMPO_PLAN_FECHA_ESTIMADA_FINALIZACION] && hasFechaEst) {
+      return res.status(403).json(FIELD_LOCKED);
+    }
+    const hasCierre =
+      Boolean(fechaFinalizacion && String(fechaFinalizacion).trim()) ||
+      Boolean(strNorm(seguimientoDetalle)) ||
+      Boolean(strNorm(seguimientoEvidenciaUrl1)) ||
+      Boolean(strNorm(seguimientoEvidenciaUrl2));
+    if (!flags[UI_CAMPO_PLAN_FECHA_FINALIZACION] && hasCierre) {
+      return res.status(403).json(FIELD_LOCKED);
+    }
+
     const plan = await prisma.planAccion.create({
       data: {
         ...(riesgoId && { riesgoId: Number(riesgoId) }),
@@ -238,6 +278,59 @@ export const updatePlan = async (req: Request, res: Response) => {
       porcentajeAvance,
       observaciones,
     } = req.body;
+
+    const existing = await prisma.planAccion.findUnique({
+      where: { id: planId },
+    });
+    if (!existing) {
+      return res.status(404).json({ error: "Plan not found" });
+    }
+
+    const flags = await getUiCamposHabilitacionFlags();
+
+    if (!flags[UI_CAMPO_PLAN_FECHA_ESTIMADA_FINALIZACION]) {
+      if (
+        fechaFin !== undefined &&
+        ymd(fechaFin) !== ymd(existing.fechaFin)
+      ) {
+        return res.status(403).json(FIELD_LOCKED);
+      }
+      if (
+        fechaProgramada !== undefined &&
+        ymd(fechaProgramada) !== ymd(existing.fechaProgramada)
+      ) {
+        return res.status(403).json(FIELD_LOCKED);
+      }
+    }
+
+    if (!flags[UI_CAMPO_PLAN_FECHA_FINALIZACION]) {
+      if (
+        fechaFinalizacion !== undefined &&
+        ymd(fechaFinalizacion) !== ymd(existing.fechaFinalizacion)
+      ) {
+        return res.status(403).json(FIELD_LOCKED);
+      }
+      if (
+        seguimientoDetalle !== undefined &&
+        strNorm(seguimientoDetalle) !== strNorm(existing.seguimientoDetalle)
+      ) {
+        return res.status(403).json(FIELD_LOCKED);
+      }
+      if (
+        seguimientoEvidenciaUrl1 !== undefined &&
+        strNorm(seguimientoEvidenciaUrl1) !==
+          strNorm(existing.seguimientoEvidenciaUrl1)
+      ) {
+        return res.status(403).json(FIELD_LOCKED);
+      }
+      if (
+        seguimientoEvidenciaUrl2 !== undefined &&
+        strNorm(seguimientoEvidenciaUrl2) !==
+          strNorm(existing.seguimientoEvidenciaUrl2)
+      ) {
+        return res.status(403).json(FIELD_LOCKED);
+      }
+    }
 
     const plan = await prisma.planAccion.update({
       where: { id: planId },

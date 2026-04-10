@@ -3,6 +3,11 @@ import prisma from '../prisma';
 import { redisGet, redisSet, redisDel } from '../redisClient';
 import { recalcularRiesgoInherenteDesdeCausas } from './riesgos.controller';
 import { getDeleteErrorMessage } from '../utils/prismaErrors';
+import {
+    UI_CAMPOS_HABILITACION_CLAVE,
+    defaultUiCamposHabilitacion,
+    getUiCamposHabilitacionFlags,
+} from '../services/uiCamposHabilitacion.service';
 
 const CACHE_TTL_CATALOGOS = 300; // 5 minutos
 const CACHE_KEY_TIPOLOGIAS = 'catalogos:tipologias';
@@ -690,6 +695,50 @@ export const updateMapaConfig = async (req: Request, res: Response) => {
         res.json(ejesObj);
     } catch (error) {
         res.status(500).json({ error: 'Error updating mapa config' });
+    }
+};
+
+/** GET público autenticado: flags para deshabilitar campos en formularios del frontend. */
+export const getCamposHabilitacionUi = async (_req: Request, res: Response) => {
+    try {
+        const merged = await getUiCamposHabilitacionFlags();
+        return res.json(merged);
+    } catch (error) {
+        res.status(500).json({ error: 'Error al leer habilitación de campos UI' });
+    }
+};
+
+/** PUT solo admin: actualiza flags (solo claves conocidas). */
+export const updateCamposHabilitacionUi = async (req: Request, res: Response) => {
+    try {
+        const body = req.body as Record<string, unknown>;
+        if (!body || typeof body !== 'object' || Array.isArray(body)) {
+            return res.status(400).json({ error: 'Body debe ser un objeto' });
+        }
+        const allowed = new Set(Object.keys(defaultUiCamposHabilitacion()));
+        const merged = defaultUiCamposHabilitacion();
+        for (const k of allowed) {
+            if (k in body) {
+                merged[k] = Boolean(body[k]);
+            }
+        }
+        await prisma.configuracion.upsert({
+            where: { clave: UI_CAMPOS_HABILITACION_CLAVE },
+            create: {
+                clave: UI_CAMPOS_HABILITACION_CLAVE,
+                valor: JSON.stringify(merged),
+                tipo: 'json',
+                descripcion: 'Habilitación de edición de campos en formularios (UI)',
+            },
+            update: {
+                valor: JSON.stringify(merged),
+                tipo: 'json',
+                descripcion: 'Habilitación de edición de campos en formularios (UI)',
+            },
+        });
+        res.json(merged);
+    } catch (error) {
+        res.status(500).json({ error: 'Error al guardar habilitación de campos UI' });
     }
 };
 

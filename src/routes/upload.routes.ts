@@ -17,7 +17,7 @@ interface RequestWithFile extends Request {
 
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB
+  limits: { fileSize: 25 * 1024 * 1024 }, // 25MB (evidencias y adjuntos generales)
   fileFilter: (req, file, cb) => {
     const allowed = [
       'application/pdf',

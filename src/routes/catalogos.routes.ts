@@ -8,8 +8,10 @@ import {
     getPesosImpacto, updatePesosImpacto,
     updateFrecuencias, updateFuentes, updateOrigenes, updateConsecuencias,
     createImpactoTipo, updateImpactoNiveles, deleteImpactoTipo,
-    getSubtipos, createSubtipo, updateSubtipo, deleteSubtipo
+    getSubtipos, createSubtipo, updateSubtipo, deleteSubtipo,
+    getCamposHabilitacionUi, updateCamposHabilitacionUi,
 } from '../controllers/catalogos.controller';
+import { requireRoles } from '../middleware/auth';
 
 import {
     obtenerTipologiasExtendidas,
@@ -42,6 +44,8 @@ router.get('/tipologias-extendidas/por-subtipo/:subtipoId', obtenerTipologiasPor
 
 router.get('/configuraciones', getConfiguraciones);
 router.post('/configuraciones', createConfiguracion);
+router.get('/campos-habilitacion-ui', getCamposHabilitacionUi);
+router.put('/campos-habilitacion-ui', requireRoles(['admin']), updateCamposHabilitacionUi);
 router.get('/mapa-config', getMapaConfig);
 
 router.get('/objetivos', getObjetivos);

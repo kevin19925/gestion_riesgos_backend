@@ -113,9 +113,27 @@ app.use((req, res, next) => {
 
 // Global Error Handler
 app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
+    // Multer: archivo demasiado grande (el cliente puede mostrar mensaje claro)
+    if (err?.code === 'LIMIT_FILE_SIZE') {
+        return res.status(413).json({
+            error:
+                'El archivo supera el tamaño máximo permitido (25 MB). Comprima el PDF o use un archivo más liviano.',
+            code: 'FILE_TOO_LARGE',
+        });
+    }
+    if (
+        typeof err?.message === 'string' &&
+        err.message.includes('Tipo de archivo no permitido')
+    ) {
+        return res.status(400).json({
+            error: err.message,
+            code: 'INVALID_FILE_TYPE',
+        });
+    }
     const status = err.status || 500;
     res.status(status).json({
         status,
+        error: err.message || 'Internal Server Error',
         message: err.message || 'Internal Server Error',
         stack: process.env.NODE_ENV === 'production' ? undefined : err.stack,
     });
