@@ -1,7 +1,18 @@
 import { Request, Response } from 'express';
 import prisma from '../prisma';
-import { redisGet, redisSet, redisDel } from '../redisClient';
+import { redisGet, redisSet, redisDel, redisDelMany } from '../redisClient';
 import { recalcularResidualPorRiesgo } from '../services/recalculoResidual.service';
+
+/** Valores de Riesgo.clasificacion (consecuencia) — alineados con el frontend / Excel */
+const CLAS_CONSECUENCIA_POSITIVA = 'Riesgo con consecuencia positiva';
+const CLAS_CONSECUENCIA_NEGATIVA = 'Riesgo con consecuencia negativa';
+
+function esFiltroConsecuencia(clasificacion: string): boolean {
+    return (
+        clasificacion === CLAS_CONSECUENCIA_POSITIVA ||
+        clasificacion === CLAS_CONSECUENCIA_NEGATIVA
+    );
+}
 
 /** Invalida caché de listado de riesgos del proceso para que el frontend vea datos actualizados */
 /**
@@ -57,15 +68,29 @@ async function calcularCalificacionGlobalImpacto(evaluacion: any): Promise<numbe
 async function invalidarCacheRiesgosProceso(procesoId: number): Promise<void> {
     if (!procesoId) return;
     const base = `riesgos:proceso:${procesoId}:page:1:size:50:causas:`;
-    await Promise.all([redisDel(`${base}false`), redisDel(`${base}true`)]).catch(() => {});
+    const keysLegacy = [`${base}false`, `${base}true`];
+    const clasVals = ['all', CLAS_CONSECUENCIA_POSITIVA, CLAS_CONSECUENCIA_NEGATIVA];
+    const keysNew: string[] = [];
+    for (const size of [50, 100]) {
+        for (const causas of [false, true]) {
+            for (const cl of clasVals) {
+                keysNew.push(
+                    `riesgos:proceso:${procesoId}:page:1:size:${size}:causas:${causas}:clas:${cl}`
+                );
+            }
+        }
+    }
+    await redisDelMany([...keysLegacy, ...keysNew]).catch(() => {});
 }
 
 /** Invalida caché de puntos del mapa (por proceso y global) para que el mapa se actualice */
 async function invalidarCacheMapaPuntos(procesoId?: number | null): Promise<void> {
-    await Promise.all([
-        redisDel('mapa:puntos:all'),
-        ...(procesoId ? [redisDel(`mapa:puntos:${procesoId}`)] : []),
-    ]).catch(() => {});
+    const ids = ['all', ...(procesoId ? [String(procesoId)] : [])];
+    const keys: string[] = ['mapa:puntos:all', ...(procesoId ? [`mapa:puntos:${procesoId}`] : [])];
+    for (const id of ids) {
+        keys.push(`mapa:puntos:${id}:clas:pos`, `mapa:puntos:${id}:clas:neg`);
+    }
+    await redisDelMany(keys).catch(() => {});
 }
 
 export const getRiesgos = async (req: Request, res: Response) => {
@@ -77,11 +102,16 @@ export const getRiesgos = async (req: Request, res: Response) => {
             where.procesoId = parsedProcesoId;
         }
     }
-    // OPTIMIZADO: Filtro de clasificación - usar evaluacion.nivelRiesgo de forma segura
+    // Consecuencia: negativos = todo lo heredado del Excel y amenazas (no oportunidad); positivos = solo explícitos
     if (clasificacion && clasificacion !== 'all') {
-        where.evaluacion = {
-            nivelRiesgo: String(clasificacion)
-        };
+        const c = String(clasificacion);
+        if (c === CLAS_CONSECUENCIA_POSITIVA) {
+            where.clasificacion = CLAS_CONSECUENCIA_POSITIVA;
+        } else if (c === CLAS_CONSECUENCIA_NEGATIVA) {
+            where.NOT = { clasificacion: CLAS_CONSECUENCIA_POSITIVA };
+        } else {
+            where.evaluacion = { nivelRiesgo: c };
+        }
     }
     if (busqueda) {
         where.OR = [
@@ -103,7 +133,7 @@ export const getRiesgos = async (req: Request, res: Response) => {
         const includeCausasFlag = String(includeCausas) === 'true';
         const cacheKey =
             procesoId
-                ? `riesgos:proceso:${procesoId}:page:${pageNum}:size:${take}:causas:${includeCausasFlag}`
+                ? `riesgos:proceso:${procesoId}:page:${pageNum}:size:${take}:causas:${includeCausasFlag}:clas:${String(clasificacion || 'all')}`
                 : null;
 
         if (cacheKey) {
@@ -654,8 +684,12 @@ export const getEstadisticas = async (req: Request, res: Response) => {
             altos: riesgosConEvaluacion.filter((r: any) => r.evaluacion?.nivelRiesgo === 'Alto').length,
             medios: riesgosConEvaluacion.filter((r: any) => r.evaluacion?.nivelRiesgo === 'Medio').length,
             bajos: riesgosConEvaluacion.filter((r: any) => r.evaluacion?.nivelRiesgo === 'Bajo').length,
-            positivos: riesgosConEvaluacion.filter((r: any) => r.clasificacion === 'Positiva').length,
-            negativos: riesgosConEvaluacion.filter((r: any) => r.clasificacion === 'Negativa').length,
+            positivos: riesgosConEvaluacion.filter(
+                (r: any) => r.clasificacion === CLAS_CONSECUENCIA_POSITIVA
+            ).length,
+            negativos: riesgosConEvaluacion.filter(
+                (r: any) => r.clasificacion !== CLAS_CONSECUENCIA_POSITIVA
+            ).length,
             evaluados: riesgosConEvaluacion.filter((r: any) => r.evaluacion).length,
             sinEvaluar: riesgosConEvaluacion.filter((r: any) => !r.evaluacion).length,
         };
@@ -686,16 +720,28 @@ export const getRiesgosRecientes = async (req: Request, res: Response) => {
 const MAPA_CACHE_TTL = 90; // segundos: balance entre frescura y velocidad
 
 export const getPuntosMapa = async (req: Request, res: Response) => {
-    const { procesoId } = req.query;
+    const { procesoId, clasificacion: clasificacionQ } = req.query;
     const where: any = {};
     // Solo filtrar por proceso si se especifica explícitamente
     if (procesoId && procesoId !== 'all' && procesoId !== 'undefined' && procesoId !== 'null') {
         where.procesoId = Number(procesoId);
     }
-    // Si no hay procesoId o es 'all', where estará vacío y se obtendrán TODOS los riesgos
+    let clasificacionStr =
+        clasificacionQ && clasificacionQ !== 'all' && clasificacionQ !== 'undefined' && clasificacionQ !== 'null'
+            ? String(clasificacionQ)
+            : CLAS_CONSECUENCIA_NEGATIVA;
+    if (!esFiltroConsecuencia(clasificacionStr)) {
+        clasificacionStr = CLAS_CONSECUENCIA_NEGATIVA;
+    }
+    if (clasificacionStr === CLAS_CONSECUENCIA_POSITIVA) {
+        where.clasificacion = CLAS_CONSECUENCIA_POSITIVA;
+    } else {
+        where.NOT = { clasificacion: CLAS_CONSECUENCIA_POSITIVA };
+    }
+
+    const cacheKey = `mapa:puntos:${where.procesoId ?? 'all'}:clas:${clasificacionStr === CLAS_CONSECUENCIA_POSITIVA ? 'pos' : 'neg'}`;
 
     try {
-        const cacheKey = `mapa:puntos:${where.procesoId ?? 'all'}`;
         const cached = await redisGet<any>(cacheKey);
         if (cached) {
             res.setHeader('Cache-Control', 'private, max-age=60');
@@ -1014,6 +1060,11 @@ export async function recalcularRiesgoInherenteDesdeCausas(riesgoId: number): Pr
         });
 
         if (!riesgo || !riesgo.evaluacion) return;
+
+        // Oportunidades (consecuencia positiva): cálculo y guardado en evaluación son distintos al flujo Excel/amenazas; no recalcular desde causas con la misma fórmula que los negativos
+        if (riesgo.clasificacion === CLAS_CONSECUENCIA_POSITIVA) {
+            return;
+        }
 
         // Si no hay causas, establecer a 0
         if (!riesgo.causas || riesgo.causas.length === 0) {

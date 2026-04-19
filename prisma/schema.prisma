@@ -48,6 +48,10 @@ model Usuario {
   asistenciasReunion            AsistenciaReunion[]       @relation("AsistenciaReunion")
   dispositivosConfiables        DispositivoConfiable[]    @relation("UsuarioDispositivos")
   auditoriaAutenticacion        AuditoriaAutenticacion[]  @relation("UsuarioAuditoria")
+
+  @@index([roleId])
+  @@index([cargoId])
+  @@index([activo])
 }
 
 model Cargo {
@@ -76,6 +80,8 @@ model Area {
   updatedAt   DateTime  @updatedAt
   director    Usuario?  @relation("DirectorArea", fields: [directorId], references: [id])
   procesos    Proceso[]
+
+  @@index([directorId])
 }
 
 model Proceso {
@@ -116,6 +122,11 @@ model Proceso {
   reuniones                      ReunionProceso[]
 
   @@index([gerenciaId])
+  @@index([areaId])
+  @@index([responsableId])
+  @@index([estado])
+  @@index([activo])
+  @@index([areaId, estado])
 }
 
 model ProcesoResponsable {
@@ -227,6 +238,13 @@ model Riesgo {
   @@unique([procesoId, numero])
   @@index([procesoId])
   @@index([createdAt])
+  @@index([procesoId, createdAt(sort: Desc)])
+  @@index([clasificacion])
+  @@index([tipologiaTipo1Id])
+  @@index([tipologiaTipo2Id])
+  @@index([objetivoId])
+  @@index([procesoId, clasificacion])
+  @@index([updatedAt])
 }
 
 model CausaRiesgo {
@@ -273,6 +291,7 @@ model ControlRiesgo {
   causaRiesgo                         CausaRiesgo  @relation(fields: [causaRiesgoId], references: [id], onDelete: Cascade)
   planAccionVinculado                 PlanAccion?  @relation("ControlVinculadoPlan", fields: [planAccionVinculadoId], references: [id])
 
+  @@index([causaRiesgoId])
   @@index([planAccionVinculadoId])
 }
 
@@ -301,6 +320,9 @@ model EvaluacionRiesgo {
   disponibilidadSGSI   Int?
   integridadSGSI       Int?
   riesgo               Riesgo   @relation(fields: [riesgoId], references: [id], onDelete: Cascade)
+
+  @@index([nivelRiesgo])
+  @@index([nivelRiesgoResidual])
 }
 
 model PriorizacionRiesgo {
@@ -350,6 +372,12 @@ model PlanAccion {
   controlesVinculados     ControlRiesgo[]     @relation("ControlVinculadoPlan")
 
   @@index([causaRiesgoId])
+  @@index([riesgoId])
+  @@index([incidenciaId])
+  @@index([priorizacionId])
+  @@index([estado])
+  @@index([riesgoId, estado])
+  @@index([createdAt])
 }
 
 model Control {
@@ -402,6 +430,9 @@ model Incidencia {
   @@index([riesgoId])
   @@index([causaRiesgoId])
   @@index([fechaOcurrencia])
+  @@index([estado])
+  @@index([responsableId])
+  @@index([procesoId, estado])
 }
 
 model TipoRiesgo {
@@ -422,6 +453,7 @@ model SubtipoRiesgo {
   tipologiasExtendidas TipologiaRiesgoExtendida[]
 
   @@unique([nombre, tipoRiesgoId], name: "nombre_tipo")
+  @@index([tipoRiesgoId])
 }
 
 model TipologiaRiesgoExtendida {
@@ -519,6 +551,8 @@ model CalificacionInherenteConfig {
   formulaBase     FormulaCalificacionInherente?
   rangos          RangoCalificacion[]
   reglaAgregacion ReglaAgregacionCalificacion?
+
+  @@index([activa])
 }
 
 model FormulaCalificacionInherente {
@@ -603,6 +637,8 @@ model ConfiguracionResidual {
   rangosEvaluacion                    RangoEvaluacionResidual[]
   rangosNivelRiesgo                   RangoNivelRiesgoResidual[]
   tablaMitigacion                     TablaMitigacionResidual[]
+
+  @@index([activa])
 }
 
 model PesoCriterioResidual {
@@ -615,6 +651,8 @@ model PesoCriterioResidual {
   createdAt DateTime              @default(now())
   updatedAt DateTime              @default(now())
   config    ConfiguracionResidual @relation(fields: [configId], references: [id], onDelete: Cascade)
+
+  @@index([configId])
 }
 
 model RangoEvaluacionResidual {
@@ -630,6 +668,8 @@ model RangoEvaluacionResidual {
   createdAt     DateTime              @default(now())
   updatedAt     DateTime              @default(now())
   config        ConfiguracionResidual @relation(fields: [configId], references: [id], onDelete: Cascade)
+
+  @@index([configId])
 }
 
 model TablaMitigacionResidual {
@@ -642,6 +682,8 @@ model TablaMitigacionResidual {
   createdAt  DateTime              @default(now())
   updatedAt  DateTime              @default(now())
   config     ConfiguracionResidual @relation(fields: [configId], references: [id], onDelete: Cascade)
+
+  @@index([configId])
 }
 
 model OpcionCriterioResidual {
@@ -655,6 +697,8 @@ model OpcionCriterioResidual {
   createdAt DateTime              @default(now())
   updatedAt DateTime              @default(now())
   config    ConfiguracionResidual @relation(fields: [configId], references: [id], onDelete: Cascade)
+
+  @@index([configId])
 }
 
 model RangoNivelRiesgoResidual {
@@ -670,6 +714,8 @@ model RangoNivelRiesgoResidual {
   createdAt     DateTime              @default(now())
   updatedAt     DateTime              @default(now())
   config        ConfiguracionResidual @relation(fields: [configId], references: [id], onDelete: Cascade)
+
+  @@index([configId])
 }
 
 model CalificacionResidualConfig {
@@ -710,6 +756,8 @@ model HistorialEvento {
   @@index([fecha])
   @@index([modulo])
   @@index([procesoId])
+  @@index([usuarioId, fecha])
+  @@index([entidadTipo, entidadId])
 }
 
 model RangoCalificacionResidual {
