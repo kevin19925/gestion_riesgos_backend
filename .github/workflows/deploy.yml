@@ -1,3 +1,5 @@
+# Cada push a main despliega producción. Para evitar roturas:
+# integrar en develop con PR + CI verde; luego PR develop → main.
 name: Deploy Empresa
 on:
   push:
