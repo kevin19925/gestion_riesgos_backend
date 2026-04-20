@@ -48,6 +48,8 @@ model Usuario {
   asistenciasReunion            AsistenciaReunion[]       @relation("AsistenciaReunion")
   dispositivosConfiables        DispositivoConfiable[]    @relation("UsuarioDispositivos")
   auditoriaAutenticacion        AuditoriaAutenticacion[]  @relation("UsuarioAuditoria")
+  medidasCreadasMA              MedidaAdministracion[]    @relation("MedidaCreadaPor")
+  medidasActualizadasMA         MedidaAdministracion[]    @relation("MedidaActualizadaPor")
 
   @@index([roleId])
   @@index([cargoId])
@@ -248,19 +250,20 @@ model Riesgo {
 }
 
 model CausaRiesgo {
-  id                 Int                   @id @default(autoincrement())
-  riesgoId           Int
-  descripcion        String
-  fuenteCausa        String?
-  frecuencia         String?
-  seleccionada       Boolean               @default(false)
-  alertas            AlertaVencimiento[]
-  riesgo             Riesgo                @relation(fields: [riesgoId], references: [id], onDelete: Cascade)
-  controlesDerivados Control?              @relation("CausaToControl")
-  controles          ControlRiesgo[]
-  historialEstados   HistorialEstadoPlan[]
-  incidencias        Incidencia[]
-  planesAccion       PlanAccion[]
+  id                    Int                    @id @default(autoincrement())
+  riesgoId              Int
+  descripcion           String
+  fuenteCausa           String?
+  frecuencia            String?
+  seleccionada          Boolean                @default(false)
+  alertas               AlertaVencimiento[]
+  riesgo                Riesgo                 @relation(fields: [riesgoId], references: [id], onDelete: Cascade)
+  controlesDerivados    Control?               @relation("CausaToControl")
+  controles             ControlRiesgo[]
+  historialEstados      HistorialEstadoPlan[]
+  incidencias           Incidencia[]
+  planesAccion          PlanAccion[]
+  medidasAdministracion MedidaAdministracion[]
 
   @@index([riesgoId])
 }
@@ -945,4 +948,36 @@ model AuditoriaAutenticacion {
   @@index([evento])
   @@index([createdAt])
   @@index([exitoso])
+}
+
+model MedidaAdministracion {
+  id                   Int          @id @default(autoincrement())
+  causaRiesgoId        Int
+  descripcion          String
+  afecta               String?      @db.VarChar(20)
+  presupuesto          String?      @db.VarChar(20)
+  puntajePresupuesto   Float?
+  stakeholders         String?      @db.VarChar(20)
+  puntajeStakeholders  Float?
+  entrenamiento        String?      @db.VarChar(20)
+  puntajeEntrenamiento Float?
+  politicas            String?      @db.VarChar(20)
+  puntajePoliticas     Float?
+  monitoreo            String?      @db.VarChar(20)
+  puntajeMonitoreo     Float?
+  puntajeTotal         Float?
+  evaluacion           String?      @db.VarChar(50)
+  factorReduccion      Float?
+  responsable          String?
+  fechaCreacion        DateTime     @default(now())
+  fechaActualizacion   DateTime     @updatedAt
+  creadoPor            Int?
+  actualizadoPor       Int?
+  causaRiesgo          CausaRiesgo  @relation(fields: [causaRiesgoId], references: [id], onDelete: Cascade)
+  creador              Usuario?     @relation("MedidaCreadaPor", fields: [creadoPor], references: [id])
+  actualizador         Usuario?     @relation("MedidaActualizadaPor", fields: [actualizadoPor], references: [id])
+
+  @@index([causaRiesgoId])
+  @@index([creadoPor])
+  @@index([actualizadoPor])
 }

@@ -30,6 +30,7 @@ import iaRoutes from './ia.routes';
 import reunionesIndividualRoutes from './reuniones-individual.routes';
 import auth2FARoutes from './auth-2fa.routes';
 import admin2FARoutes from './admin-2fa.routes';
+import medidasAdministracionRoutes from './medidas-administracion.routes';
 
 const router = Router();
 
@@ -91,5 +92,6 @@ if (process.env.NODE_ENV !== 'production') {
 router.use('/audit', auditRoutes); // Sistema de auditoría
 router.use('/ia', iaRoutes); // IA (Responses API + Mongo)
 router.use('/reuniones', reunionesIndividualRoutes); // Rutas individuales de reuniones
+router.use('/medidas-administracion', medidasAdministracionRoutes); // Medidas de Administración para riesgos positivos
 
 export default router;
