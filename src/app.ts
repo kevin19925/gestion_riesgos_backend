@@ -25,6 +25,16 @@ app.use(
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
+// JSON siempre UTF-8 explícito (evita proxies/clientes que asumen Latin-1)
+app.use((_req, res, next) => {
+  const sendJson = res.json.bind(res);
+  res.json = (body?: unknown) => {
+    res.setHeader('Content-Type', 'application/json; charset=utf-8');
+    return sendJson(body);
+  };
+  next();
+});
+
 // CORS Configuration
 const extraOrigins = (process.env.CORS_ORIGINS || '')
   .split(',')
