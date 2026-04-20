@@ -2,30 +2,16 @@ import { Request, Response } from 'express';
 import prisma from '../prisma';
 import { redisGet, redisSet, redisDel, redisDelMany } from '../redisClient';
 import { recalcularResidualPorRiesgo } from '../services/recalculoResidual.service';
-import { calcularResidualOportunidad } from '../services/recalculoResidual.service';
 
-/** Valores de Riesgo.clasificacion (consecuencia) — la BD tiene DOS formatos coexistentes:
- *  - Formato largo (Excel/legado): 'Riesgo con consecuencia positiva' / 'Riesgo con consecuencia negativa'
- *  - Formato corto (UI nueva):     'Positiva' / 'Negativa'
- *  Todas las comparaciones deben aceptar AMBOS formatos.
- */
-const CLAS_POSITIVA_VALORES = ['Riesgo con consecuencia positiva', 'Positiva'];
-const CLAS_NEGATIVA_VALORES = ['Riesgo con consecuencia negativa', 'Negativa'];
-
-/** El valor canónico usado para comparación en getPuntosMapa (pasado como query param) */
+/** Valores de Riesgo.clasificacion (consecuencia) — alineados con el frontend / Excel */
 const CLAS_CONSECUENCIA_POSITIVA = 'Riesgo con consecuencia positiva';
 const CLAS_CONSECUENCIA_NEGATIVA = 'Riesgo con consecuencia negativa';
 
-/** Normaliza cualquier formato de clasificacion a 'positiva' | 'negativa' */
-function normalizarClasificacion(c: string): 'positiva' | 'negativa' {
-    const cl = c.toLowerCase();
-    if (cl.includes('positiv')) return 'positiva';
-    return 'negativa';
-}
-
 function esFiltroConsecuencia(clasificacion: string): boolean {
-    const norm = normalizarClasificacion(clasificacion);
-    return norm === 'positiva' || norm === 'negativa';
+    return (
+        clasificacion === CLAS_CONSECUENCIA_POSITIVA ||
+        clasificacion === CLAS_CONSECUENCIA_NEGATIVA
+    );
 }
 
 /** Invalida caché de listado de riesgos del proceso para que el frontend vea datos actualizados */
@@ -116,15 +102,15 @@ export const getRiesgos = async (req: Request, res: Response) => {
             where.procesoId = parsedProcesoId;
         }
     }
-    // Consecuencia: acepta ambos formatos ('Positiva' y 'Riesgo con consecuencia positiva')
+    // Consecuencia: negativos = todo lo heredado del Excel y amenazas (no oportunidad); positivos = solo explícitos
     if (clasificacion && clasificacion !== 'all') {
         const c = String(clasificacion);
-        const norm = normalizarClasificacion(c);
-        if (norm === 'positiva') {
-            where.clasificacion = { in: CLAS_POSITIVA_VALORES };
+        if (c === CLAS_CONSECUENCIA_POSITIVA) {
+            where.clasificacion = CLAS_CONSECUENCIA_POSITIVA;
+        } else if (c === CLAS_CONSECUENCIA_NEGATIVA) {
+            where.NOT = { clasificacion: CLAS_CONSECUENCIA_POSITIVA };
         } else {
-            // Riesgos negativos: todo lo que NO sea positivo
-            where.NOT = { clasificacion: { in: CLAS_POSITIVA_VALORES } };
+            where.evaluacion = { nivelRiesgo: c };
         }
     }
     if (busqueda) {
@@ -699,10 +685,10 @@ export const getEstadisticas = async (req: Request, res: Response) => {
             medios: riesgosConEvaluacion.filter((r: any) => r.evaluacion?.nivelRiesgo === 'Medio').length,
             bajos: riesgosConEvaluacion.filter((r: any) => r.evaluacion?.nivelRiesgo === 'Bajo').length,
             positivos: riesgosConEvaluacion.filter(
-                (r: any) => normalizarClasificacion(r.clasificacion || '') === 'positiva'
+                (r: any) => r.clasificacion === CLAS_CONSECUENCIA_POSITIVA
             ).length,
             negativos: riesgosConEvaluacion.filter(
-                (r: any) => normalizarClasificacion(r.clasificacion || '') !== 'positiva'
+                (r: any) => r.clasificacion !== CLAS_CONSECUENCIA_POSITIVA
             ).length,
             evaluados: riesgosConEvaluacion.filter((r: any) => r.evaluacion).length,
             sinEvaluar: riesgosConEvaluacion.filter((r: any) => !r.evaluacion).length,
@@ -747,15 +733,13 @@ export const getPuntosMapa = async (req: Request, res: Response) => {
     if (!esFiltroConsecuencia(clasificacionStr)) {
         clasificacionStr = CLAS_CONSECUENCIA_NEGATIVA;
     }
-    // Normalizar el valor recibido para aceptar ambos formatos
-    const esMapaPositivo = normalizarClasificacion(clasificacionStr) === 'positiva';
-    if (esMapaPositivo) {
-        where.clasificacion = { in: CLAS_POSITIVA_VALORES };
+    if (clasificacionStr === CLAS_CONSECUENCIA_POSITIVA) {
+        where.clasificacion = CLAS_CONSECUENCIA_POSITIVA;
     } else {
-        where.NOT = { clasificacion: { in: CLAS_POSITIVA_VALORES } };
+        where.NOT = { clasificacion: CLAS_CONSECUENCIA_POSITIVA };
     }
 
-    const cacheKey = `mapa:puntos:${where.procesoId ?? 'all'}:clas:${esMapaPositivo ? 'pos' : 'neg'}`;
+    const cacheKey = `mapa:puntos:${where.procesoId ?? 'all'}:clas:${clasificacionStr === CLAS_CONSECUENCIA_POSITIVA ? 'pos' : 'neg'}`;
 
     try {
         const cached = await redisGet<any>(cacheKey);
@@ -811,116 +795,130 @@ export const getPuntosMapa = async (req: Request, res: Response) => {
         // Incluir TODOS los riesgos con evaluación (no filtrar por valores específicos)
         // IMPORTANTE: Solo generar UN punto por riesgo (evitar duplicados)
         const riesgosProcesados = new Set<number>();
-        const riesgosFiltrados = riesgos
+        const puntos = riesgos
             .filter(r => {
                 // Solo incluir riesgos con evaluación
                 if (!r.evaluacion) return false;
                 // Evitar duplicados: si este riesgo ya fue procesado, saltarlo
                 if (riesgosProcesados.has(r.id)) return false;
+                // Incluir todos los riesgos con evaluación, incluso si no tienen valores perfectos
+                // El cálculo se hará después con fallbacks
                 riesgosProcesados.add(r.id);
                 return true;
-            });
+            })
+            .map(r => {
+                let probabilidad: number;
+                let impacto: number;
 
-        // Calcular inherente e residual (async para poder usar calcularResidualOportunidad)
-        const puntosConResidual = await Promise.all(riesgosFiltrados.map(async (r) => {
-            let probabilidad: number;
-            let impacto: number;
+                const riesgoInherente = r.evaluacion!.riesgoInherente;
+                const probGuardada = Number(r.evaluacion!.probabilidad);
+                const impGuardado = Number(r.evaluacion!.impactoGlobal);
+                const tieneEjesGuardados = !isNaN(probGuardada) && probGuardada >= 1 && probGuardada <= 5 &&
+                    !isNaN(impGuardado) && impGuardado >= 1 && impGuardado <= 5;
 
-            const riesgoInherente = r.evaluacion!.riesgoInherente;
-            const probGuardada = Number(r.evaluacion!.probabilidad);
-            const impGuardado = Number(r.evaluacion!.impactoGlobal);
-            const tieneEjesGuardados = !isNaN(probGuardada) && probGuardada >= 1 && probGuardada <= 5 &&
-                !isNaN(impGuardado) && impGuardado >= 1 && impGuardado <= 5;
-
-            // Prioridad 1: Usar probabilidad e impacto guardados cuando son válidos (1-5).
-            if (riesgoInherente && riesgoInherente > 0 && !isNaN(riesgoInherente) && tieneEjesGuardados) {
-                probabilidad = Math.round(probGuardada);
-                impacto = Math.round(impGuardado);
-            } else if (riesgoInherente && riesgoInherente > 0 && !isNaN(riesgoInherente)) {
-                // Fallback: descomponer riesgoInherente en prob×imp
-                let mejorProb = 1;
-                let mejorImp = 1;
-                let encontradoExacto = false;
-                for (let prob = 5; prob >= 1; prob--) {
-                    const imp = prob;
-                    const valor = prob === 2 && imp === 2 ? 3.99 : prob * imp;
-                    if (Math.abs(valor - riesgoInherente) < 0.01) {
-                        mejorProb = prob; mejorImp = imp; encontradoExacto = true; break;
-                    }
-                }
-                if (!encontradoExacto) {
-                    for (let imp = 5; imp >= 1; imp--) {
-                        for (let prob = 1; prob <= 5; prob++) {
-                            const valor = prob === 2 && imp === 2 ? 3.99 : prob * imp;
-                            if (Math.abs(valor - riesgoInherente) < 0.01) {
-                                mejorProb = prob; mejorImp = imp; encontradoExacto = true; break;
-                            }
-                        }
-                        if (encontradoExacto) break;
-                    }
-                }
-                if (!encontradoExacto) {
-                    let menorDiferencia = Infinity;
-                    for (let prob = 1; prob <= 5; prob++) {
-                        for (let imp = 1; imp <= 5; imp++) {
-                            const valor = prob === 2 && imp === 2 ? 3.99 : prob * imp;
-                            if (valor >= riesgoInherente) {
-                                const diferencia = valor - riesgoInherente;
-                                if (diferencia < menorDiferencia) { menorDiferencia = diferencia; mejorProb = prob; mejorImp = imp; }
-                            }
+                // Prioridad 1: Usar probabilidad e impacto guardados cuando son válidos (1-5).
+                // Ejes del mapa: X = Frecuencia (probabilidad), Y = Impacto. Misma convención en inherente y residual.
+                if (riesgoInherente && riesgoInherente > 0 && !isNaN(riesgoInherente) && tieneEjesGuardados) {
+                    probabilidad = Math.round(probGuardada);
+                    impacto = Math.round(impGuardado);
+                } else if (riesgoInherente && riesgoInherente > 0 && !isNaN(riesgoInherente)) {
+                    // Fallback: descomponer riesgoInherente en prob×imp (puede intercambiar ejes)
+                    let mejorProb = 1;
+                    let mejorImp = 1;
+                    let encontradoExacto = false;
+                    for (let prob = 5; prob >= 1; prob--) {
+                        const imp = prob;
+                        const valor = prob === 2 && imp === 2 ? 3.99 : prob * imp;
+                        if (Math.abs(valor - riesgoInherente) < 0.01) {
+                            mejorProb = prob;
+                            mejorImp = imp;
+                            encontradoExacto = true;
+                            break;
                         }
                     }
-                    if (menorDiferencia === Infinity) {
+                    if (!encontradoExacto) {
+                        for (let imp = 5; imp >= 1; imp--) {
+                            for (let prob = 1; prob <= 5; prob++) {
+                                const valor = prob === 2 && imp === 2 ? 3.99 : prob * imp;
+                                if (Math.abs(valor - riesgoInherente) < 0.01) {
+                                    mejorProb = prob;
+                                    mejorImp = imp;
+                                    encontradoExacto = true;
+                                    break;
+                                }
+                            }
+                            if (encontradoExacto) break;
+                        }
+                    }
+                    if (!encontradoExacto) {
+                        let menorDiferencia = Infinity;
                         for (let prob = 1; prob <= 5; prob++) {
                             for (let imp = 1; imp <= 5; imp++) {
                                 const valor = prob === 2 && imp === 2 ? 3.99 : prob * imp;
-                                const diferencia = Math.abs(riesgoInherente - valor);
-                                if (diferencia < menorDiferencia) { menorDiferencia = diferencia; mejorProb = prob; mejorImp = imp; }
+                                if (valor >= riesgoInherente) {
+                                    const diferencia = valor - riesgoInherente;
+                                    if (diferencia < menorDiferencia) {
+                                        menorDiferencia = diferencia;
+                                        mejorProb = prob;
+                                        mejorImp = imp;
+                                    }
+                                }
+                            }
+                        }
+                        if (menorDiferencia === Infinity) {
+                            for (let prob = 1; prob <= 5; prob++) {
+                                for (let imp = 1; imp <= 5; imp++) {
+                                    const valor = prob === 2 && imp === 2 ? 3.99 : prob * imp;
+                                    const diferencia = Math.abs(riesgoInherente - valor);
+                                    if (diferencia < menorDiferencia) {
+                                        menorDiferencia = diferencia;
+                                        mejorProb = prob;
+                                        mejorImp = imp;
+                                    }
+                                }
                             }
                         }
                     }
+                    probabilidad = mejorProb;
+                    impacto = mejorImp;
+                } else {
+                    // Fallback: usar probabilidad e impactoGlobal directamente, o valores por defecto
+                    const probEval = Number(r.evaluacion!.probabilidad);
+                    const impEval = Number(r.evaluacion!.impactoGlobal);
+                    
+                    if (!isNaN(probEval) && probEval >= 1 && probEval <= 5) {
+                        probabilidad = Math.round(probEval);
+                    } else {
+                        probabilidad = 1; // Valor por defecto para que aparezca en el mapa
+                    }
+                    
+                    if (!isNaN(impEval) && impEval >= 1 && impEval <= 5) {
+                        impacto = Math.round(impEval);
+                    } else {
+                        impacto = 1; // Valor por defecto para que aparezca en el mapa
+                    }
                 }
-                probabilidad = mejorProb;
-                impacto = mejorImp;
-            } else {
-                // Fallback: usar probabilidad e impactoGlobal directamente, o valores por defecto
-                const probEval = Number(r.evaluacion!.probabilidad);
-                const impEval = Number(r.evaluacion!.impactoGlobal);
-                probabilidad = (!isNaN(probEval) && probEval >= 1 && probEval <= 5) ? Math.round(probEval) : 1;
-                impacto = (!isNaN(impEval) && impEval >= 1 && impEval <= 5) ? Math.round(impEval) : 1;
-            }
-
-            // ================================================
-            // CALCULAR RESIDUAL
-            // ================================================
-            let probabilidadResidual: number | null = null;
-            let impactoResidual: number | null = null;
-
-            if (clasificacionStr === CLAS_CONSECUENCIA_POSITIVA) {
-                // RIESGOS POSITIVOS: usar Medidas de Administración
-                try {
-                    const residual = await calcularResidualOportunidad(r.id);
-                    probabilidadResidual = Math.max(1, Math.min(5, residual.probabilidadResidual));
-                    impactoResidual = Math.max(1, Math.min(5, residual.impactoResidual));
-                } catch (_err) {
-                    // Sin medidas o error: residual = inherente
-                    probabilidadResidual = probabilidad;
-                    impactoResidual = impacto;
-                }
-            } else {
-                // RIESGOS NEGATIVOS: usar controles (lógica existente guardada en EvaluacionRiesgo)
+                
+                // Calcular valores residuales. Ejes: X = Frecuencia (probabilidad), Y = Impacto.
+                // Si el riesgo NO tiene ninguna causa con control (solo PLAN no cuenta), residual = inherente → misma ubicación.
                 const sinControles = !riesgoIdsConControl.has(r.id);
+
+                let probabilidadResidual: number | null = null;
+                let impactoResidual: number | null = null;
 
                 if (sinControles) {
                     probabilidadResidual = probabilidad;
                     impactoResidual = impacto;
                 } else {
+                    // Prioridad 1: Usar BY y BZ guardados (frecuencia residual = X, impacto residual = Y).
+                    // Así la ubicación en el mapa coincide con la tabla: X = frecuencia residual, Y = impacto residual.
                     const probResEval = r.evaluacion!.probabilidadResidual;
                     const impResEval = r.evaluacion!.impactoResidual;
                     if (probResEval != null && impResEval != null && !isNaN(Number(probResEval)) && !isNaN(Number(impResEval))) {
                         probabilidadResidual = Math.max(1, Math.min(5, Math.round(Number(probResEval))));
                         impactoResidual = Math.max(1, Math.min(5, Math.round(Number(impResEval))));
                     } else {
+                        // Fallback: descomponer riesgoResidual en (prob, imp) solo si no hay ejes guardados
                         const riesgoResidualVal = r.evaluacion!.riesgoResidual;
                         if (riesgoResidualVal && riesgoResidualVal > 0 && !isNaN(riesgoResidualVal)) {
                             let mejorProbRes = 1;
@@ -930,7 +928,10 @@ export const getPuntosMapa = async (req: Request, res: Response) => {
                                 for (let imp = 1; imp <= 5; imp++) {
                                     const valor = prob === 2 && imp === 2 ? 3.99 : prob * imp;
                                     if (Math.abs(valor - riesgoResidualVal) < 0.01) {
-                                        mejorProbRes = prob; mejorImpRes = imp; encontradoExacto = true; break;
+                                        mejorProbRes = prob;
+                                        mejorImpRes = imp;
+                                        encontradoExacto = true;
+                                        break;
                                     }
                                 }
                                 if (encontradoExacto) break;
@@ -942,7 +943,11 @@ export const getPuntosMapa = async (req: Request, res: Response) => {
                                         const valor = prob === 2 && imp === 2 ? 3.99 : prob * imp;
                                         if (valor >= riesgoResidualVal) {
                                             const diferencia = valor - riesgoResidualVal;
-                                            if (diferencia < menorDiferencia) { menorDiferencia = diferencia; mejorProbRes = prob; mejorImpRes = imp; }
+                                            if (diferencia < menorDiferencia) {
+                                                menorDiferencia = diferencia;
+                                                mejorProbRes = prob;
+                                                mejorImpRes = imp;
+                                            }
                                         }
                                     }
                                 }
@@ -951,7 +956,11 @@ export const getPuntosMapa = async (req: Request, res: Response) => {
                                         for (let imp = 1; imp <= 5; imp++) {
                                             const valor = prob === 2 && imp === 2 ? 3.99 : prob * imp;
                                             const diferencia = Math.abs(riesgoResidualVal - valor);
-                                            if (diferencia < menorDiferencia) { menorDiferencia = diferencia; mejorProbRes = prob; mejorImpRes = imp; }
+                                            if (diferencia < menorDiferencia) {
+                                                menorDiferencia = diferencia;
+                                                mejorProbRes = prob;
+                                                mejorImpRes = imp;
+                                            }
                                         }
                                     }
                                 }
@@ -968,37 +977,40 @@ export const getPuntosMapa = async (req: Request, res: Response) => {
                         impactoResidual = impacto;
                     }
                 }
-            }
+                
+                // Calificación residual del riesgo (máx. de causas con control) — misma fuente que mapa y resumen
+                const riesgoResidualEval = r.evaluacion!.riesgoResidual;
+                const nivelRiesgoResidualEval = r.evaluacion!.nivelRiesgoResidual;
+                const calResidualNum =
+                    probabilidadResidual != null && impactoResidual != null
+                        ? (probabilidadResidual === 2 && impactoResidual === 2 ? 3.99 : probabilidadResidual * impactoResidual)
+                        : (riesgoResidualEval != null ? Number(riesgoResidualEval) : undefined);
 
-            const riesgoResidualEval = r.evaluacion!.riesgoResidual;
-            const nivelRiesgoResidualEval = r.evaluacion!.nivelRiesgoResidual;
-            const calResidualNum =
-                probabilidadResidual != null && impactoResidual != null
-                    ? (probabilidadResidual === 2 && impactoResidual === 2 ? 3.99 : probabilidadResidual * impactoResidual)
-                    : (riesgoResidualEval != null ? Number(riesgoResidualEval) : undefined);
+                return {
+                    riesgoId: r.id,
+                    descripcion: r.descripcion,
+                    probabilidad,
+                    impacto,
 
-            return {
-                riesgoId: r.id,
-                descripcion: r.descripcion,
-                probabilidad,
-                impacto,
-                probabilidadResidual,
-                impactoResidual,
-                riesgoResidual: riesgoResidualEval != null ? Number(riesgoResidualEval) : calResidualNum,
-                nivelRiesgoResidual: nivelRiesgoResidualEval ?? undefined,
-                nivelRiesgo: r.evaluacion!.nivelRiesgo,
-                clasificacion: r.clasificacion,
-                numero: r.numero,
-                siglaGerencia: r.proceso?.sigla || '',
-                numeroIdentificacion: r.numeroIdentificacion || `${r.numero || r.id}${r.proceso?.sigla || 'R'}`,
-                procesoId: r.procesoId,
-                procesoNombre: r.proceso?.nombre || 'Proceso desconocido'
-            };
-        }));
+                    // Residual (posición en mapa y calificación final)
+                    probabilidadResidual,
+                    impactoResidual,
+                    riesgoResidual: riesgoResidualEval != null ? Number(riesgoResidualEval) : calResidualNum,
+                    nivelRiesgoResidual: nivelRiesgoResidualEval ?? undefined,
 
-        await redisSet(cacheKey, puntosConResidual, MAPA_CACHE_TTL);
+                    nivelRiesgo: r.evaluacion!.nivelRiesgo,
+                    clasificacion: r.clasificacion,
+                    numero: r.numero,
+                    siglaGerencia: r.proceso?.sigla || '',
+                    numeroIdentificacion: r.numeroIdentificacion || `${r.numero || r.id}${r.proceso?.sigla || 'R'}`,
+                    procesoId: r.procesoId,
+                    procesoNombre: r.proceso?.nombre || 'Proceso desconocido'
+                };
+            });
+
+        await redisSet(cacheKey, puntos, MAPA_CACHE_TTL);
         res.setHeader('Cache-Control', 'private, max-age=60');
-        res.json(puntosConResidual);
+        res.json(puntos);
     } catch (error) {
         res.status(500).json({ error: 'Error fetching map points' });
     }
@@ -1049,8 +1061,8 @@ export async function recalcularRiesgoInherenteDesdeCausas(riesgoId: number): Pr
 
         if (!riesgo || !riesgo.evaluacion) return;
 
-        // Oportunidades (consecuencia positiva): no recalcular residual desde causas con la fórmula de riesgos negativos
-        if (normalizarClasificacion(riesgo.clasificacion || '') === 'positiva') {
+        // Oportunidades (consecuencia positiva): cálculo y guardado en evaluación son distintos al flujo Excel/amenazas; no recalcular desde causas con la misma fórmula que los negativos
+        if (riesgo.clasificacion === CLAS_CONSECUENCIA_POSITIVA) {
             return;
         }
 
