@@ -1,7 +1,215 @@
 import { Request, Response } from 'express';
 import prisma from '../prisma';
-import { getDeleteErrorMessage } from '../utils/prismaErrors';
+import { getDeleteErrorMessage, isPrismaSchemaColumnMissing } from '../utils/prismaErrors';
 import { redisGet, redisSet, redisDel } from '../redisClient';
+import { recalcularResidualPorRiesgo } from '../services/recalculoResidual.service';
+
+/** Select de listado sin `residualModo` (fallback si la migración aún no está en BD). */
+const PROCESO_LIST_SELECT_BASE = {
+    id: true,
+    nombre: true,
+    descripcion: true,
+    objetivo: true,
+    tipo: true,
+    responsableId: true,
+    areaId: true,
+    vicepresidencia: true,
+    gerenciaId: true,
+    estado: true,
+    activo: true,
+    analisis: true,
+    documentoUrl: true,
+    documentoNombre: true,
+    createdAt: true,
+    updatedAt: true,
+    sigla: true,
+    responsable: {
+        select: {
+            id: true,
+            nombre: true,
+            email: true,
+        },
+    },
+    gerencia: {
+        select: {
+            id: true,
+            nombre: true,
+        },
+    },
+    responsables: {
+        select: {
+            modo: true,
+            usuario: {
+                select: {
+                    id: true,
+                    nombre: true,
+                    email: true,
+                    roleRelacion: {
+                        select: {
+                            codigo: true,
+                            nombre: true,
+                        },
+                    },
+                },
+            },
+        },
+    },
+    area: {
+        select: {
+            id: true,
+            nombre: true,
+            director: {
+                select: {
+                    id: true,
+                    nombre: true,
+                    email: true,
+                },
+            },
+        },
+    },
+    participantes: {
+        select: {
+            id: true,
+            nombre: true,
+            email: true,
+        },
+    },
+} as const;
+
+/** Respuesta de update cuando la BD no tiene `residualModo` (evita RETURNING de columnas inexistentes). */
+const PROCESO_UPDATE_SELECT_SIN_RESIDUAL = {
+    id: true,
+    nombre: true,
+    descripcion: true,
+    objetivo: true,
+    tipo: true,
+    responsableId: true,
+    areaId: true,
+    vicepresidencia: true,
+    estado: true,
+    activo: true,
+    analisis: true,
+    documentoUrl: true,
+    documentoNombre: true,
+    documentoCaracterizacionUrl: true,
+    documentoCaracterizacionNombre: true,
+    documentoFlujoGramaUrl: true,
+    documentoFlujoGramaNombre: true,
+    createdAt: true,
+    updatedAt: true,
+    sigla: true,
+    gerenciaId: true,
+    dofaItems: true,
+    normatividades: true,
+    contextos: true,
+    contextoItems: true,
+    participantes: true,
+} as const;
+
+/** Select detalle de proceso (sin residualModo) si la migración aún no está en BD. */
+const PROCESO_BY_ID_SELECT_NO_RESIDUAL = {
+    id: true,
+    nombre: true,
+    descripcion: true,
+    objetivo: true,
+    tipo: true,
+    responsableId: true,
+    areaId: true,
+    vicepresidencia: true,
+    gerencia: true,
+    estado: true,
+    activo: true,
+    analisis: true,
+    documentoUrl: true,
+    documentoNombre: true,
+    documentoCaracterizacionUrl: true,
+    documentoCaracterizacionNombre: true,
+    documentoFlujoGramaUrl: true,
+    documentoFlujoGramaNombre: true,
+    createdAt: true,
+    updatedAt: true,
+    sigla: true,
+    responsable: {
+        select: {
+            id: true,
+            nombre: true,
+            email: true,
+        },
+    },
+    responsables: {
+        select: {
+            modo: true,
+            usuario: {
+                select: {
+                    id: true,
+                    nombre: true,
+                    email: true,
+                },
+            },
+        },
+    },
+    area: {
+        select: {
+            id: true,
+            nombre: true,
+            director: {
+                select: {
+                    id: true,
+                    nombre: true,
+                    email: true,
+                },
+            },
+        },
+    },
+    riesgos: {
+        select: {
+            id: true,
+            numero: true,
+            descripcion: true,
+            numeroIdentificacion: true,
+            clasificacion: true,
+            tipologiaTipo1Id: true,
+            tipologiaTipo2Id: true,
+        },
+        take: 100,
+    },
+    dofaItems: { select: { id: true, tipo: true, descripcion: true } },
+    normatividades: {
+        select: {
+            id: true,
+            numero: true,
+            nombre: true,
+            estado: true,
+            regulador: true,
+            sanciones: true,
+            plazoImplementacion: true,
+            cumplimiento: true,
+            detalleIncumplimiento: true,
+            riesgoIdentificado: true,
+            clasificacion: true,
+            comentarios: true,
+            responsable: true,
+        },
+    },
+    contextos: { select: { id: true, tipo: true, descripcion: true } },
+    contextoItems: {
+        select: {
+            id: true,
+            tipo: true,
+            signo: true,
+            descripcion: true,
+            enviarADofa: true,
+            dofaDimension: true,
+        },
+    },
+    participantes: {
+        select: {
+            id: true,
+            nombre: true,
+            email: true,
+        },
+    },
+} as const;
 
 export const getProcesos = async (req: Request, res: Response) => {
     try {
@@ -10,119 +218,67 @@ export const getProcesos = async (req: Request, res: Response) => {
         const cached = await redisGet<any>(cacheKey);
         if (cached) return res.json(cached);
 
-        // OPTIMIZADO: Límite para no colgar con miles de procesos
-        const procesos = await prisma.proceso.findMany({
-            take: 2000,
-            orderBy: { createdAt: 'desc' },
-            select: {
-                id: true,
-                nombre: true,
-                descripcion: true,
-                objetivo: true,
-                tipo: true,
-                responsableId: true,
-                areaId: true,
-                vicepresidencia: true,
-                gerenciaId: true,
-                estado: true,
-                activo: true,
-                analisis: true,
-                documentoUrl: true,
-                documentoNombre: true,
-                createdAt: true,
-                updatedAt: true,
-                sigla: true,
-                // OPTIMIZADO: Select específico para responsable (solo campos necesarios)
-                responsable: {
-                    select: {
-                        id: true,
-                        nombre: true,
-                        email: true
-                    }
-                },
-                // OPTIMIZADO: Select específico para gerencia
-                gerencia: {
-                    select: {
-                        id: true,
-                        nombre: true
-                    }
-                },
-                // OPTIMIZADO: Select específico para responsables múltiples
-                responsables: {
-                    select: {
-                        modo: true,
-                        usuario: {
-                            select: {
-                                id: true,
-                                nombre: true,
-                                email: true,
-                                roleRelacion: {
-                                    select: {
-                                        codigo: true,
-                                        nombre: true
-                                    }
-                                }
-                            }
-                        }
-                    }
-                },
-                // OPTIMIZADO: Select específico para área
-                area: {
-                    select: {
-                        id: true,
-                        nombre: true,
-                        director: {
-                            select: {
-                                id: true,
-                                nombre: true,
-                                email: true
-                            }
-                        }
-                    }
-                },
-                // OPTIMIZADO: Limitar participantes a solo campos necesarios
-                participantes: {
-                    select: {
-                        id: true,
-                        nombre: true,
-                        email: true
-                    }
-                }
-            },
-        });
-        
+        let procesos: any[];
+        try {
+            procesos = await prisma.proceso.findMany({
+                take: 2000,
+                orderBy: { createdAt: 'desc' },
+                select: { ...PROCESO_LIST_SELECT_BASE, residualModo: true },
+            });
+        } catch (firstErr: unknown) {
+            if (!isPrismaSchemaColumnMissing(firstErr)) throw firstErr;
+            console.warn(
+                '[procesos/getProcesos] Columna residualModo no encontrada; respuesta sin columna (ESTANDAR por defecto). Ejecute migraciones Prisma.'
+            );
+            await redisDel(cacheKey).catch(() => {});
+            procesos = await prisma.proceso.findMany({
+                take: 2000,
+                orderBy: { createdAt: 'desc' },
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                select: PROCESO_LIST_SELECT_BASE as any,
+            });
+        }
+
         // Mapear para agregar areaNombre, gerenciaNombre y lista de responsables para facilitar uso en frontend
         const procesosConAreaNombre = procesos.map((p: any) => {
-            const responsablesList = (p.responsables || []).map((r: any) => {
-                const modo = r.modo !== undefined ? r.modo : null;
-                return {
-                    id: r.usuario.id,
-                    nombre: r.usuario.nombre,
-                    email: r.usuario.email,
-                    role: r.usuario.roleRelacion?.codigo || null,
-                    modo: modo
-                };
-            });
-            
+            const responsablesList = (p.responsables || [])
+                .map((r: any) => {
+                    const u = r?.usuario;
+                    if (!u?.id) return null;
+                    const modo = r.modo !== undefined ? r.modo : null;
+                    return {
+                        id: u.id,
+                        nombre: u.nombre,
+                        email: u.email,
+                        role: u.roleRelacion?.codigo || null,
+                        modo,
+                    };
+                })
+                .filter(Boolean);
+
             return {
                 ...p,
                 areaNombre: p.area?.nombre || null,
                 gerenciaNombre: p.gerencia?.nombre || null,
-                responsablesList: responsablesList
+                responsablesList,
+                residualModo: p.residualModo ?? 'ESTANDAR',
             };
         });
-        
+
         // OPTIMIZADO: Cachear resultado por 5 minutos (si Redis falla, responder igual)
         try {
-          await redisSet(cacheKey, procesosConAreaNombre, 300);
+            await redisSet(cacheKey, procesosConAreaNombre, 300);
         } catch (_) {
-          // ignorar fallo de cache
+            // ignorar fallo de cache
         }
         res.json(procesosConAreaNombre);
     } catch (error: any) {
         console.error('[procesos/getProcesos]', error?.message ?? error);
-        res.status(500).json({ 
+        res.status(500).json({
             error: 'Error al cargar procesos',
+            ...(process.env.NODE_ENV !== 'production' && {
+                details: error?.message ?? String(error),
+            }),
         });
     }
 };
@@ -145,113 +301,46 @@ export const getProcesoById = async (req: Request, res: Response) => {
         const cached = await redisGet<any>(cacheKey);
         if (cached) return res.json(cached);
 
-        // OPTIMIZADO: Usar select específico para reducir datos
-        const proceso = await prisma.proceso.findUnique({
-            where: { id: procesoId },
-            select: {
-                id: true,
-                nombre: true,
-                descripcion: true,
-                objetivo: true,
-                tipo: true,
-                responsableId: true,
-                areaId: true,
-                vicepresidencia: true,
-                gerencia: true,
-                estado: true,
-                activo: true,
-                analisis: true,
-                documentoUrl: true,
-                documentoNombre: true,
-                documentoCaracterizacionUrl: true,
-                documentoCaracterizacionNombre: true,
-                documentoFlujoGramaUrl: true,
-                documentoFlujoGramaNombre: true,
-                createdAt: true,
-                updatedAt: true,
-                sigla: true,
-                responsable: {
-                    select: {
-                        id: true,
-                        nombre: true,
-                        email: true
-                    }
-                },
-                responsables: {
-                    select: {
-                        modo: true,
-                        usuario: {
-                            select: {
-                                id: true,
-                                nombre: true,
-                                email: true
-                            }
-                        }
-                    }
-                },
-                area: {
-                    select: {
-                        id: true,
-                        nombre: true,
-                        director: {
-                            select: {
-                                id: true,
-                                nombre: true,
-                                email: true
-                            }
-                        }
-                    }
-                },
-                // OPTIMIZADO: Limitar riesgos a solo campos básicos
-                riesgos: {
-                    select: {
-                        id: true,
-                        numero: true,
-                        descripcion: true,
-                        numeroIdentificacion: true,
-                        clasificacion: true,
-                        tipologiaTipo1Id: true,
-                        tipologiaTipo2Id: true
-                    },
-                    take: 100
-                },
-                dofaItems: { select: { id: true, tipo: true, descripcion: true } },
-                normatividades: { 
-                    select: { 
-                        id: true, 
-                        numero: true, 
-                        nombre: true, 
-                        estado: true, 
-                        regulador: true, 
-                        sanciones: true,
-                        plazoImplementacion: true,
-                        cumplimiento: true,
-                        detalleIncumplimiento: true,
-                        riesgoIdentificado: true,
-                        clasificacion: true,
-                        comentarios: true,
-                        responsable: true
-                    } 
-                },
-                contextos: { select: { id: true, tipo: true, descripcion: true } },
-                contextoItems: { select: { id: true, tipo: true, signo: true, descripcion: true, enviarADofa: true, dofaDimension: true } },
-                participantes: {
-                    select: {
-                        id: true,
-                        nombre: true,
-                        email: true
-                    }
-                }
+        const selectFull = {
+            ...PROCESO_BY_ID_SELECT_NO_RESIDUAL,
+            residualModo: true as const,
+        };
+
+        let proceso: any;
+        try {
+            proceso = await prisma.proceso.findUnique({
+                where: { id: procesoId },
+                select: selectFull,
+            });
+        } catch (firstErr: unknown) {
+            if (!isPrismaSchemaColumnMissing(firstErr)) throw firstErr;
+            console.warn(
+                '[procesos/getProcesoById] Columna residualModo u otra columna nueva no encontrada; reintento sin residualModo. Ejecute migraciones Prisma.'
+            );
+            await redisDel(cacheKey).catch(() => {});
+            proceso = await prisma.proceso.findUnique({
+                where: { id: procesoId },
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                select: PROCESO_BY_ID_SELECT_NO_RESIDUAL as any,
+            });
+            if (proceso) {
+                proceso = { ...proceso, residualModo: 'ESTANDAR' };
             }
-        });
+        }
         if (!proceso) return res.status(404).json({ error: 'Proceso not found' });
-        
+
         // OPTIMIZADO: Cachear por 5 minutos
         await redisSet(cacheKey, proceso, 300);
-        
+
         res.json(proceso);
-    } catch (error) {
-        res.status(500).json({ error: 'Error fetching proceso' });
+    } catch (error: any) {
+        console.error('[procesos/getProcesoById]', error?.message ?? error);
+        res.status(500).json({
+            error: 'Error fetching proceso',
+            ...(process.env.NODE_ENV !== 'production' && {
+                details: error?.message ?? String(error),
+            }),
+        });
     }
 };
 
@@ -274,10 +363,32 @@ export const createProceso = async (req: Request, res: Response) => {
         if (req.body.estado) data.estado = req.body.estado;
         if (req.body.activo !== undefined) data.activo = Boolean(req.body.activo);
 
-        const nuevoProceso = await prisma.proceso.create({
-            data
-        });
-        
+        if (req.body.residualModo !== undefined) {
+            const m = String(req.body.residualModo).trim().toUpperCase();
+            if (m === 'ESTANDAR' || m === 'ESTRATEGICO') {
+                (data as any).residualModo = m;
+            }
+        }
+
+        let nuevoProceso;
+        try {
+            nuevoProceso = await prisma.proceso.create({
+                data,
+            });
+        } catch (e: unknown) {
+            if (!isPrismaSchemaColumnMissing(e) || (data as { residualModo?: string }).residualModo === undefined) {
+                throw e;
+            }
+            const { residualModo: _r, ...dataSinResidual } = data as Record<string, unknown>;
+            console.warn(
+                '[procesos/createProceso] BD sin columna residualModo; proceso creado sin modo residual. Migre la BD.'
+            );
+            nuevoProceso = await prisma.proceso.create({
+                data: dataSinResidual as typeof data,
+            });
+            (nuevoProceso as { residualModo?: string }).residualModo = 'ESTANDAR';
+        }
+
         // NUEVO: Si se asignó un responsableId, crear registro en ProcesoResponsable con modo="proceso"
         if (responsableId && Number(responsableId) > 0) {
             try {
@@ -339,11 +450,21 @@ export const updateProceso = async (req: Request, res: Response) => {
             }
         }
 
-        // Guardar el responsableId anterior para comparar
-        const procesoAnterior = await prisma.proceso.findUnique({
-            where: { id },
-            select: { responsableId: true }
-        });
+        // Guardar el responsableId anterior para comparar (fallback si BD sin columna residualModo)
+        let procesoAnterior: { responsableId: number | null; residualModo: string | null } | null = null;
+        try {
+            procesoAnterior = await prisma.proceso.findUnique({
+                where: { id },
+                select: { responsableId: true, residualModo: true },
+            });
+        } catch (e: unknown) {
+            if (!isPrismaSchemaColumnMissing(e)) throw e;
+            const p = await prisma.proceso.findUnique({
+                where: { id },
+                select: { responsableId: true },
+            });
+            procesoAnterior = p ? { responsableId: p.responsableId, residualModo: 'ESTANDAR' } : null;
+        }
 
         if (responsableId !== undefined) {
             updateData.responsableId = responsableId ? Number(responsableId) : null;
@@ -458,17 +579,50 @@ export const updateProceso = async (req: Request, res: Response) => {
             delete (updateData as any).id;
         }
 
-        const proceso = await prisma.proceso.update({
-            where: { id },
-            data: updateData,
-            include: {
-                dofaItems: true,
-                normatividades: true,
-                contextos: true,
-                contextoItems: true,
-                participantes: true,
+        if (updateData.residualModo !== undefined) {
+            const m = String(updateData.residualModo).trim().toUpperCase();
+            if (m === 'ESTANDAR' || m === 'ESTRATEGICO') {
+                updateData.residualModo = m;
+            } else {
+                delete updateData.residualModo;
             }
-        });
+        }
+
+        const includeBlock = {
+            dofaItems: true,
+            normatividades: true,
+            contextos: true,
+            contextoItems: true,
+            participantes: true,
+        };
+
+        let proceso: any;
+        let residualModoPersistidoEnBd = true;
+
+        try {
+            proceso = await prisma.proceso.update({
+                where: { id },
+                data: updateData,
+                include: includeBlock,
+            });
+        } catch (firstUp: unknown) {
+            if (!isPrismaSchemaColumnMissing(firstUp)) throw firstUp;
+            const { residualModo: _omitResidual, ...updateSinResidual } = updateData;
+            if (updateData.residualModo !== undefined) {
+                residualModoPersistidoEnBd = false;
+                console.warn(
+                    '[procesos/updateProceso] La BD no tiene columna residualModo; no se puede guardar modo estratégico hasta migrar. Ejecute: npx prisma migrate deploy'
+                );
+            }
+            proceso = await prisma.proceso.update({
+                where: { id },
+                data: updateSinResidual,
+                // select limita RETURNING: evita pedir columnas que no existen en PostgreSQL
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                select: PROCESO_UPDATE_SELECT_SIN_RESIDUAL as any,
+            });
+            proceso.residualModo = 'ESTANDAR';
+        }
 
         // Invalidar caché de este proceso y del listado general para que el frontend vea los cambios al instante
         try {
@@ -477,6 +631,22 @@ export const updateProceso = async (req: Request, res: Response) => {
         } catch (cacheErr) {
             // No romper la respuesta si falla Redis; solo loguear en consola
             console.warn('[procesos.updateProceso] No se pudo invalidar caché Redis:', cacheErr);
+        }
+
+        if (
+            residualModoPersistidoEnBd &&
+            updateData.residualModo !== undefined &&
+            updateData.residualModo !== procesoAnterior?.residualModo
+        ) {
+            const riesgosProceso = await prisma.riesgo.findMany({
+                where: { procesoId: id },
+                select: { id: true },
+            });
+            for (const r of riesgosProceso) {
+                await recalcularResidualPorRiesgo(r.id).catch((e) =>
+                    console.warn('[procesos.updateProceso] recalcularResidualPorRiesgo:', e)
+                );
+            }
         }
 
         // NUEVO: Sincronizar ProcesoResponsable cuando cambia responsableId

@@ -46,7 +46,10 @@ export const getTipologias = async (req: Request, res: Response) => {
                 id: true,
                 nombre: true,
                 descripcion: true,
-                subtipos: { select: { id: true, nombre: true, tipoRiesgoId: true }, orderBy: { id: 'asc' } }
+                subtipos: {
+                    select: { id: true, nombre: true, descripcion: true, tipoRiesgoId: true },
+                    orderBy: { id: 'asc' },
+                },
             }
         });
         await redisSet(CACHE_KEY_TIPOLOGIAS, tipologias, CACHE_TTL_CATALOGOS);

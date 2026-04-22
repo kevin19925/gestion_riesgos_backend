@@ -17,7 +17,16 @@
     "exportar-config-residual": "npx tsx scripts/exportar-datos-config-residual.ts",
     "aplicar-procedimiento-residual": "npx tsx scripts/aplicar-procedimiento-residual.ts",
     "consulta-bd-clasificacion-residual": "npx tsx scripts/consulta-bd-clasificacion-residual.ts",
-    "test:residual": "npx tsx scripts/pruebas-recalculo-residual.ts"
+    "test:residual": "npx tsx scripts/pruebas-recalculo-residual.ts",
+    "test:estrategico-engine": "npx tsx scripts/test-estrategico-engine.ts",
+    "recalcular:estrategico": "npx tsx scripts/recalcular-estrategicos-once.ts",
+    "test:residual-modo": "node scripts/test-residual-modo-normalize.mjs",
+    "test:normalize-texto-ui": "npx tsx scripts/test-normalize-texto-ui.ts",
+    "test:bd-texto": "npx tsx scripts/test-bd-texto-encoding.ts",
+    "normalizar:texto-bd": "npx tsx scripts/normalizar-texto-bd.ts",
+    "repair:proceso-texto": "npx tsx scripts/repair-proceso-11-codigos.ts",
+    "backfill:subtipo-descripciones": "npx tsx prisma/backfill-subtipo-descripciones-tipologia2.ts",
+    "repair:tipologia-nombres-utf8": "npx tsx prisma/repair-tipologia-nombres-utf8.ts"
   },
   "keywords": [
     "node",

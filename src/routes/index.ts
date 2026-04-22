@@ -24,6 +24,7 @@ import uploadRoutes from './upload.routes';
 import procesoResponsablesRoutes from './proceso-responsables.routes';
 import calificacionInherenteRoutes from './calificacion-inherente.routes';
 import configuracionResidualRoutes from './configuracionResidual.routes';
+import configuracionResidualEstrategicaRoutes from './configuracionResidualEstrategica.routes';
 import debugRoutes from './debug.routes';
 import auditRoutes from './audit.routes';
 import iaRoutes from './ia.routes';
@@ -85,6 +86,7 @@ router.use('/upload', uploadRoutes);
 router.use('/procesos', procesoResponsablesRoutes);
 router.use('/calificacion-inherente', calificacionInherenteRoutes);
 router.use('/configuracion-residual', configuracionResidualRoutes);
+router.use('/configuracion-residual-estrategica', configuracionResidualEstrategicaRoutes);
 if (process.env.NODE_ENV !== 'production') {
     router.use('/debug', debugRoutes);
 }

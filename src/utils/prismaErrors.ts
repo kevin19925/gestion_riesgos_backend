@@ -6,6 +6,18 @@
 
 export type PrismaClientKnownRequestError = { code?: string; meta?: Record<string, unknown> };
 
+/** P2022 u otro error típico cuando la BD no tiene una columna que sí está en schema.prisma (p. ej. migración pendiente). */
+export function isPrismaSchemaColumnMissing(error: unknown): boolean {
+  const e = error as PrismaClientKnownRequestError;
+  if (e?.code === 'P2022') return true;
+  const msg = String((error as Error)?.message ?? error);
+  return (
+    /does not exist in the current database/i.test(msg) ||
+    /column .+ does not exist/i.test(msg) ||
+    /ColumnNotFound/i.test(msg)
+  );
+}
+
 export function getDeleteErrorMessage(
   error: unknown,
   entityName: string,

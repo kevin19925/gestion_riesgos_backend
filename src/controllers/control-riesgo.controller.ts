@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import prisma from '../prisma';
+import { recalcularResidualPorRiesgo } from '../services/recalculoResidual.service';
 
 /**
  * CONTROL RIESGO CONTROLLER
@@ -28,6 +29,12 @@ export const createControlRiesgo = async (req: Request, res: Response) => {
       descripcionControl,
       recomendacion,
       tipoMitigacion,
+      tipoMitigacionAnexo,
+      maPresupuesto,
+      maActitud,
+      maCapacitacion,
+      maDocumentacion,
+      maMonitoreo,
       estadoAmbos,
       planAccionVinculadoId
     } = req.body;
@@ -72,11 +79,21 @@ export const createControlRiesgo = async (req: Request, res: Response) => {
         descripcionControl,
         recomendacion,
         tipoMitigacion,
+        tipoMitigacionAnexo: tipoMitigacionAnexo ?? null,
+        maPresupuesto: maPresupuesto ?? null,
+        maActitud: maActitud ?? null,
+        maCapacitacion: maCapacitacion ?? null,
+        maDocumentacion: maDocumentacion ?? null,
+        maMonitoreo: maMonitoreo ?? null,
         estadoAmbos,
         planAccionVinculadoId: planAccionVinculadoId ? Number(planAccionVinculadoId) : null,
         recalculadoEn: new Date()
       }
     });
+
+    await recalcularResidualPorRiesgo(causa.riesgoId).catch((e) =>
+      console.warn('[control-riesgo] recalcularResidualPorRiesgo:', e)
+    );
 
     res.status(201).json(control);
   } catch (error) {
@@ -110,6 +127,12 @@ export const updateControlRiesgo = async (req: Request, res: Response) => {
       descripcionControl,
       recomendacion,
       tipoMitigacion,
+      tipoMitigacionAnexo,
+      maPresupuesto,
+      maActitud,
+      maCapacitacion,
+      maDocumentacion,
+      maMonitoreo,
       estadoAmbos,
       planAccionVinculadoId
     } = req.body;
@@ -156,6 +179,12 @@ export const updateControlRiesgo = async (req: Request, res: Response) => {
         ...(descripcionControl !== undefined && { descripcionControl }),
         ...(recomendacion !== undefined && { recomendacion }),
         ...(tipoMitigacion !== undefined && { tipoMitigacion }),
+        ...(tipoMitigacionAnexo !== undefined && { tipoMitigacionAnexo }),
+        ...(maPresupuesto !== undefined && { maPresupuesto }),
+        ...(maActitud !== undefined && { maActitud }),
+        ...(maCapacitacion !== undefined && { maCapacitacion }),
+        ...(maDocumentacion !== undefined && { maDocumentacion }),
+        ...(maMonitoreo !== undefined && { maMonitoreo }),
         ...(estadoAmbos !== undefined && { estadoAmbos }),
         ...(planAccionVinculadoId !== undefined && { 
           planAccionVinculadoId: planAccionVinculadoId ? Number(planAccionVinculadoId) : null 
@@ -163,6 +192,16 @@ export const updateControlRiesgo = async (req: Request, res: Response) => {
         recalculadoEn: new Date()
       }
     });
+
+    const causaUp = await prisma.causaRiesgo.findUnique({
+      where: { id: controlExistente.causaRiesgoId },
+      select: { riesgoId: true },
+    });
+    if (causaUp) {
+      await recalcularResidualPorRiesgo(causaUp.riesgoId).catch((e) =>
+        console.warn('[control-riesgo] recalcularResidualPorRiesgo:', e)
+      );
+    }
 
     res.json(control);
   } catch (error) {
@@ -191,9 +230,20 @@ export const deleteControlRiesgo = async (req: Request, res: Response) => {
       return res.status(404).json({ error: 'Control no encontrado' });
     }
 
+    const causaDel = await prisma.causaRiesgo.findUnique({
+      where: { id: controlExistente.causaRiesgoId },
+      select: { riesgoId: true },
+    });
+
     await prisma.controlRiesgo.delete({
       where: { id: Number(id) }
     });
+
+    if (causaDel) {
+      await recalcularResidualPorRiesgo(causaDel.riesgoId).catch((e) =>
+        console.warn('[control-riesgo] recalcularResidualPorRiesgo:', e)
+      );
+    }
 
     res.json({ message: 'Control eliminado exitosamente' });
   } catch (error) {

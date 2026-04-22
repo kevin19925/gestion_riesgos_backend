@@ -23,7 +23,7 @@ let cachedSystemMessageCora: string | null = null;
 
 function getSystemMessageCora(): string {
   if (cachedSystemMessageCora) return cachedSystemMessageCora;
-  const docPath = path.join(__dirname, '../../docs/SYSTEM_MESSAGE_CORA.md');
+  const docPath = path.join(__dirname, '../config/SYSTEM_MESSAGE_CORA.md');
   try {
     const raw = fs.readFileSync(docPath, 'utf-8');
     const match = raw.match(/```\s*\n([\s\S]*?)\n```/);

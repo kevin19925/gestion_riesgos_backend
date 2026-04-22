@@ -9,6 +9,7 @@
  */
 
 import prisma from '../prisma';
+import { recalcularResidualEstrategicoPorRiesgo } from './estrategicoResidual.service';
 
 const LOG_PREFIX = '[RecalcResidual]';
 import {
@@ -297,7 +298,7 @@ export async function recalcularTodosLosRiesgosResiduales(
       include: {
         controles: true,
         riesgo: {
-          include: { evaluacion: true }
+          include: { evaluacion: true, proceso: true }
         }
       }
     });
@@ -305,10 +306,15 @@ export async function recalcularTodosLosRiesgosResiduales(
     console.log(`${LOG_PREFIX} Causas con controles a procesar: ${causasConControles.length}`);
 
     const riesgosAfectados = new Set<number>();
+    const riesgosEstrategicos = new Set<number>();
     const actualizacionesControles: { controlId: number; datos: any }[] = [];
 
     for (const causa of causasConControles) {
       try {
+        if (causa.riesgo?.proceso?.residualModo === 'ESTRATEGICO') {
+          riesgosEstrategicos.add(causa.riesgoId);
+          continue;
+        }
         for (const control of causa.controles) {
           const recalculo = await recalcularControl(
             control,
@@ -365,7 +371,7 @@ export async function recalcularTodosLosRiesgosResiduales(
       }
     }
 
-    // Actualizar EvaluacionRiesgo de todos los riesgos
+    // Actualizar EvaluacionRiesgo de todos los riesgos (estándar) + motor CWR para estratégicos
     if (!preview) {
       const todosRiesgoIds = Array.from(riesgosAfectados);
       console.log(`${LOG_PREFIX} Actualizando EvaluacionRiesgo para ${todosRiesgoIds.length} riesgos...`);
@@ -376,6 +382,16 @@ export async function recalcularTodosLosRiesgosResiduales(
         await Promise.all(loteIds.map((riesgoId) => actualizarEvaluacionRiesgo(riesgoId)));
       }
       resultado.riesgosActualizados = todosRiesgoIds.length;
+
+      const estrategicos = Array.from(riesgosEstrategicos);
+      if (estrategicos.length > 0) {
+        console.log(`${LOG_PREFIX} Recálculo residual estratégico (CWR) para ${estrategicos.length} riesgos...`);
+        for (let i = 0; i < estrategicos.length; i += LOTE_EVAL) {
+          const lote = estrategicos.slice(i, i + LOTE_EVAL);
+          await Promise.all(lote.map((riesgoId) => recalcularResidualEstrategicoPorRiesgo(riesgoId)));
+        }
+        resultado.riesgosActualizados += estrategicos.length;
+      }
     }
 
     console.log(`${LOG_PREFIX} Fin: ${resultado.controlesActualizados} controles actualizados, ${resultado.riesgosActualizados} riesgos con mapa residual actualizado.`);
@@ -452,6 +468,15 @@ async function actualizarEvaluacionRiesgo(riesgoId: number) {
  * Recalcula el riesgo residual solo para un riesgo
  */
 export async function recalcularResidualPorRiesgo(riesgoId: number): Promise<void> {
+  const riesgoModo = await prisma.riesgo.findUnique({
+    where: { id: riesgoId },
+    select: { proceso: { select: { residualModo: true } } },
+  });
+  if (riesgoModo?.proceso?.residualModo === 'ESTRATEGICO') {
+    await recalcularResidualEstrategicoPorRiesgo(riesgoId);
+    return;
+  }
+
   const config = await getConfiguracionActiva().catch(() => null);
 
   if (config) {
