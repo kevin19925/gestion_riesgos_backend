@@ -17,10 +17,29 @@ function esFiltroConsecuencia(clasificacion: string): boolean {
 /** Invalida caché de listado de riesgos del proceso para que el frontend vea datos actualizados */
 /**
  * Función helper para calcular calificacionGlobalImpacto de un riesgo
- * basándose en los impactos de su evaluación y los pesos configurados
+ * basándose en los impactos de su evaluación y los pesos proporcionados
  */
-async function calcularCalificacionGlobalImpacto(evaluacion: any): Promise<number> {
-    // Obtener pesos de impacto desde la configuración
+function calcularCalificacionGlobalImpacto(evaluacion: any, pesosImpacto: Record<string, number>): number {
+    // Calcular calificación global impacto: nivel * porcentaje_decimal, sumar todos, redondear hacia arriba
+    const calificacionGlobalImpacto = Math.ceil(
+        (Number(evaluacion.impactoPersonas || 1) * (pesosImpacto.personas || 0)) +
+        (Number(evaluacion.impactoLegal || 1) * (pesosImpacto.legal || 0)) +
+        (Number(evaluacion.impactoAmbiental || 1) * (pesosImpacto.ambiental || 0)) +
+        (Number(evaluacion.impactoProcesos || 1) * (pesosImpacto.procesos || 0)) +
+        (Number(evaluacion.impactoReputacion || 1) * (pesosImpacto.reputacion || 0)) +
+        (Number(evaluacion.impactoEconomico || 1) * (pesosImpacto.economico || 0)) +
+        (Number(evaluacion.confidencialidadSGSI || 1) * (pesosImpacto.confidencialidadSGSI || 0)) +
+        (Number(evaluacion.disponibilidadSGSI || 1) * (pesosImpacto.disponibilidadSGSI || 0)) +
+        (Number(evaluacion.integridadSGSI || 1) * (pesosImpacto.integridadSGSI || 0))
+    );
+    
+    return calificacionGlobalImpacto;
+}
+
+/**
+ * Obtiene los pesos de impacto desde la configuración o retorna valores por defecto
+ */
+async function getPesosImpactoConfig(): Promise<Record<string, number>> {
     let pesosImpacto: Record<string, number> = {
         personas: 0.10,
         legal: 0.22,
@@ -42,27 +61,14 @@ async function calcularCalificacionGlobalImpacto(evaluacion: any): Promise<numbe
             const pesosArray = JSON.parse(config.valor) as Array<{ key: string; porcentaje: number }>;
             pesosImpacto = {};
             pesosArray.forEach(p => {
-                pesosImpacto[p.key] = p.porcentaje / 100; // Convertir porcentaje (0-100) a decimal (0-1)
+                pesosImpacto[p.key] = p.porcentaje / 100;
             });
         }
     } catch (error) {
         // Usar valores por defecto
     }
     
-    // Calcular calificación global impacto: nivel * porcentaje_decimal, sumar todos, redondear hacia arriba
-    const calificacionGlobalImpacto = Math.ceil(
-        (Number(evaluacion.impactoPersonas || 1) * (pesosImpacto.personas || 0)) +
-        (Number(evaluacion.impactoLegal || 1) * (pesosImpacto.legal || 0)) +
-        (Number(evaluacion.impactoAmbiental || 1) * (pesosImpacto.ambiental || 0)) +
-        (Number(evaluacion.impactoProcesos || 1) * (pesosImpacto.procesos || 0)) +
-        (Number(evaluacion.impactoReputacion || 1) * (pesosImpacto.reputacion || 0)) +
-        (Number(evaluacion.impactoEconomico || 1) * (pesosImpacto.economico || 0)) +
-        (Number(evaluacion.confidencialidadSGSI || 1) * (pesosImpacto.confidencialidadSGSI || 0)) +
-        (Number(evaluacion.disponibilidadSGSI || 1) * (pesosImpacto.disponibilidadSGSI || 0)) +
-        (Number(evaluacion.integridadSGSI || 1) * (pesosImpacto.integridadSGSI || 0))
-    );
-    
-    return calificacionGlobalImpacto;
+    return pesosImpacto;
 }
 
 async function invalidarCacheRiesgosProceso(procesoId: number): Promise<void> {
@@ -125,12 +131,14 @@ export const getRiesgos = async (req: Request, res: Response) => {
     const pageNum = (Number.isFinite(pageNumRaw) && pageNumRaw >= 1) ? pageNumRaw : 1;
     const pageSizeRaw = Number(pageSize);
     const requestedPageSize = (Number.isFinite(pageSizeRaw) && pageSizeRaw >= 1) ? pageSizeRaw : 50;
-    const take = Math.min(Math.max(1, requestedPageSize), 100); // Entre 1 y 100
+    const includeCausasFlag = String(includeCausas) === 'true';
+    // Con causas el payload es pesado; sin ellas mantenemos tope 100. Con causas (p. ej. mapa/resumen) hasta 500.
+    const maxTake = includeCausasFlag ? 500 : 100;
+    const take = Math.min(Math.max(1, requestedPageSize), maxTake);
     const skip = Math.max(0, (pageNum - 1) * take);
 
     try {
         // Caché en Redis para listados pesados (por proceso/página)
-        const includeCausasFlag = String(includeCausas) === 'true';
         const cacheKey =
             procesoId
                 ? `riesgos:proceso:${procesoId}:page:${pageNum}:size:${take}:causas:${includeCausasFlag}:clas:${String(clasificacion || 'all')}`
@@ -189,28 +197,25 @@ export const getRiesgos = async (req: Request, res: Response) => {
         
         // OPTIMIZADO: Ejecutar queries en paralelo para mejor rendimiento
         // Usar índices en procesoId y createdAt para queries más rápidas
-        // OPTIMIZADO: Ordenamiento simple por createdAt (más rápido y confiable)
-        const orderBy = { createdAt: 'desc' as const };
-
-        const [riesgos, total] = await Promise.all([
+        const [riesgos, total, pesosImpacto] = await Promise.all([
             prisma.riesgo.findMany({
                 where,
                 take,
                 skip,
                 include,
-                orderBy, // Ordenamiento simple para mejor rendimiento
+                orderBy: { id: 'desc' },
             }),
-            // OPTIMIZADO: Count más rápido usando índice
-            prisma.riesgo.count({ where })
+            prisma.riesgo.count({ where }),
+            getPesosImpactoConfig() // Obtener pesos una sola vez (evita N+1)
         ]);
 
         const totalPages = total > 0 ? Math.ceil(total / take) : 0;
         
-        // Calcular calificacionGlobalImpacto para cada riesgo de forma asíncrona
-        const dataPromises = riesgos.map(async (r: any) => {
-            // Calcular calificacionGlobalImpacto del riesgo usando la función helper
+        // OPTIMIZADO: Procesar riesgos de forma síncrona en memoria (ya tenemos todos los datos)
+        const data = riesgos.map((r: any) => {
+            // Calcular calificacionGlobalImpacto del riesgo (ahora síncrono y sin queries extra)
             const calificacionGlobalImpacto = r.evaluacion 
-                ? await calcularCalificacionGlobalImpacto(r.evaluacion)
+                ? calcularCalificacionGlobalImpacto(r.evaluacion, pesosImpacto)
                 : 1;
             
             return {
@@ -219,23 +224,19 @@ export const getRiesgos = async (req: Request, res: Response) => {
                 subtipoRiesgo: r.tipologiaTipo2Relacion?.nombre ?? null,
                 tipoRiesgoId: r.tipologiaTipo1Id ?? null,
                 subtipoRiesgoId: r.tipologiaTipo2Id ?? null,
-                // Calcular tipoGestion dinámicamente si no está presente
                 causas: (r.causas || []).map((c: any) => ({
                     ...c,
-                    // Agregar calificacionGlobalImpacto del riesgo a cada causa
                     calificacionGlobalImpacto: calificacionGlobalImpacto,
                     tipoGestion: c.tipoGestion || (
                         (c.controles?.length > 0 && c.planesAccion?.length > 0) ? 'AMBOS' :
                         c.controles?.length > 0 ? 'CONTROL' :
                         c.planesAccion?.length > 0 ? 'PLAN' :
-                        c.puntajeTotal !== undefined ? 'CONTROL' : // Fallback: si tiene puntajeTotal, es un control
+                        c.puntajeTotal !== undefined ? 'CONTROL' :
                         null
                     )
                 }))
             };
         });
-        
-        const data = await Promise.all(dataPromises);
 
         const payload = {
             data,
@@ -340,9 +341,10 @@ export const getRiesgoById = async (req: Request, res: Response) => {
 
         if (!riesgo) return res.status(404).json({ error: 'Riesgo not found' });
         
-        // Calcular calificacionGlobalImpacto del riesgo usando la función helper
+        // Obtener pesos y calcular impacto
+        const pesosImpacto = await getPesosImpactoConfig();
         const calificacionGlobalImpacto = (riesgo as any).evaluacion
-            ? await calcularCalificacionGlobalImpacto((riesgo as any).evaluacion)
+            ? calcularCalificacionGlobalImpacto((riesgo as any).evaluacion, pesosImpacto)
             : 1;
         
         const out = {
@@ -351,7 +353,6 @@ export const getRiesgoById = async (req: Request, res: Response) => {
             subtipoRiesgo: (riesgo as any).tipologiaTipo2Relacion?.nombre ?? null,
             tipoRiesgoId: (riesgo as any).tipologiaTipo1Id ?? null,
             subtipoRiesgoId: (riesgo as any).tipologiaTipo2Id ?? null,
-            // Agregar calificacionGlobalImpacto a cada causa
             causas: ((riesgo as any).causas || []).map((c: any) => ({
                 ...c,
                 calificacionGlobalImpacto: calificacionGlobalImpacto

@@ -4,7 +4,7 @@ import { getDeleteErrorMessage, isPrismaSchemaColumnMissing } from '../utils/pri
 import { redisGet, redisSet, redisDel } from '../redisClient';
 import { recalcularResidualPorRiesgo } from '../services/recalculoResidual.service';
 
-/** Select de listado sin `residualModo` (fallback si la migración aún no está en BD). */
+/** Select de listado sin `calificacionModo` (fallback si la migración aún no está en BD). */
 const PROCESO_LIST_SELECT_BASE = {
     id: true,
     nombre: true,
@@ -76,7 +76,7 @@ const PROCESO_LIST_SELECT_BASE = {
     },
 } as const;
 
-/** Respuesta de update cuando la BD no tiene `residualModo` (evita RETURNING de columnas inexistentes). */
+/** Respuesta de update cuando la BD no tiene `calificacionModo` (evita RETURNING de columnas inexistentes). */
 const PROCESO_UPDATE_SELECT_SIN_RESIDUAL = {
     id: true,
     nombre: true,
@@ -106,7 +106,7 @@ const PROCESO_UPDATE_SELECT_SIN_RESIDUAL = {
     participantes: true,
 } as const;
 
-/** Select detalle de proceso (sin residualModo) si la migración aún no está en BD. */
+/** Select detalle de proceso (sin calificacionModo) si la migración aún no está en BD. */
 const PROCESO_BY_ID_SELECT_NO_RESIDUAL = {
     id: true,
     nombre: true,
@@ -223,12 +223,12 @@ export const getProcesos = async (req: Request, res: Response) => {
             procesos = await prisma.proceso.findMany({
                 take: 2000,
                 orderBy: { createdAt: 'desc' },
-                select: { ...PROCESO_LIST_SELECT_BASE, residualModo: true },
+                select: { ...PROCESO_LIST_SELECT_BASE, calificacionModo: true },
             });
         } catch (firstErr: unknown) {
             if (!isPrismaSchemaColumnMissing(firstErr)) throw firstErr;
             console.warn(
-                '[procesos/getProcesos] Columna residualModo no encontrada; respuesta sin columna (ESTANDAR por defecto). Ejecute migraciones Prisma.'
+                '[procesos/getProcesos] Columna calificacionModo no encontrada; respuesta sin columna (ESTANDAR por defecto). Ejecute migraciones Prisma.'
             );
             await redisDel(cacheKey).catch(() => {});
             procesos = await prisma.proceso.findMany({
@@ -261,7 +261,7 @@ export const getProcesos = async (req: Request, res: Response) => {
                 areaNombre: p.area?.nombre || null,
                 gerenciaNombre: p.gerencia?.nombre || null,
                 responsablesList,
-                residualModo: p.residualModo ?? 'ESTANDAR',
+                calificacionModo: p.calificacionModo ?? 'ESTANDAR',
             };
         });
 
@@ -303,7 +303,7 @@ export const getProcesoById = async (req: Request, res: Response) => {
 
         const selectFull = {
             ...PROCESO_BY_ID_SELECT_NO_RESIDUAL,
-            residualModo: true as const,
+            calificacionModo: true as const,
         };
 
         let proceso: any;
@@ -315,7 +315,7 @@ export const getProcesoById = async (req: Request, res: Response) => {
         } catch (firstErr: unknown) {
             if (!isPrismaSchemaColumnMissing(firstErr)) throw firstErr;
             console.warn(
-                '[procesos/getProcesoById] Columna residualModo u otra columna nueva no encontrada; reintento sin residualModo. Ejecute migraciones Prisma.'
+                '[procesos/getProcesoById] Columna calificacionModo u otra columna nueva no encontrada; reintento sin calificacionModo. Ejecute migraciones Prisma.'
             );
             await redisDel(cacheKey).catch(() => {});
             proceso = await prisma.proceso.findUnique({
@@ -324,7 +324,7 @@ export const getProcesoById = async (req: Request, res: Response) => {
                 select: PROCESO_BY_ID_SELECT_NO_RESIDUAL as any,
             });
             if (proceso) {
-                proceso = { ...proceso, residualModo: 'ESTANDAR' };
+                proceso = { ...proceso, calificacionModo: 'ESTANDAR' };
             }
         }
         if (!proceso) return res.status(404).json({ error: 'Proceso not found' });
@@ -363,10 +363,10 @@ export const createProceso = async (req: Request, res: Response) => {
         if (req.body.estado) data.estado = req.body.estado;
         if (req.body.activo !== undefined) data.activo = Boolean(req.body.activo);
 
-        if (req.body.residualModo !== undefined) {
-            const m = String(req.body.residualModo).trim().toUpperCase();
+        if (req.body.calificacionModo !== undefined) {
+            const m = String(req.body.calificacionModo).trim().toUpperCase();
             if (m === 'ESTANDAR' || m === 'ESTRATEGICO') {
-                (data as any).residualModo = m;
+                (data as any).calificacionModo = m;
             }
         }
 
@@ -376,17 +376,17 @@ export const createProceso = async (req: Request, res: Response) => {
                 data,
             });
         } catch (e: unknown) {
-            if (!isPrismaSchemaColumnMissing(e) || (data as { residualModo?: string }).residualModo === undefined) {
+            if (!isPrismaSchemaColumnMissing(e) || (data as { calificacionModo?: string }).calificacionModo === undefined) {
                 throw e;
             }
-            const { residualModo: _r, ...dataSinResidual } = data as Record<string, unknown>;
+            const { calificacionModo: _r, ...dataSinResidual } = data as Record<string, unknown>;
             console.warn(
-                '[procesos/createProceso] BD sin columna residualModo; proceso creado sin modo residual. Migre la BD.'
+                '[procesos/createProceso] BD sin columna calificacionModo; proceso creado sin modo residual. Migre la BD.'
             );
             nuevoProceso = await prisma.proceso.create({
                 data: dataSinResidual as typeof data,
             });
-            (nuevoProceso as { residualModo?: string }).residualModo = 'ESTANDAR';
+            (nuevoProceso as { calificacionModo?: string }).calificacionModo = 'ESTANDAR';
         }
 
         // NUEVO: Si se asignó un responsableId, crear registro en ProcesoResponsable con modo="proceso"
@@ -450,12 +450,12 @@ export const updateProceso = async (req: Request, res: Response) => {
             }
         }
 
-        // Guardar el responsableId anterior para comparar (fallback si BD sin columna residualModo)
-        let procesoAnterior: { responsableId: number | null; residualModo: string | null } | null = null;
+        // Guardar el responsableId anterior para comparar (fallback si BD sin columna calificacionModo)
+        let procesoAnterior: { responsableId: number | null; calificacionModo: string | null } | null = null;
         try {
             procesoAnterior = await prisma.proceso.findUnique({
                 where: { id },
-                select: { responsableId: true, residualModo: true },
+                select: { responsableId: true, calificacionModo: true },
             });
         } catch (e: unknown) {
             if (!isPrismaSchemaColumnMissing(e)) throw e;
@@ -463,7 +463,7 @@ export const updateProceso = async (req: Request, res: Response) => {
                 where: { id },
                 select: { responsableId: true },
             });
-            procesoAnterior = p ? { responsableId: p.responsableId, residualModo: 'ESTANDAR' } : null;
+            procesoAnterior = p ? { responsableId: p.responsableId, calificacionModo: 'ESTANDAR' } : null;
         }
 
         if (responsableId !== undefined) {
@@ -579,12 +579,12 @@ export const updateProceso = async (req: Request, res: Response) => {
             delete (updateData as any).id;
         }
 
-        if (updateData.residualModo !== undefined) {
-            const m = String(updateData.residualModo).trim().toUpperCase();
+        if (updateData.calificacionModo !== undefined) {
+            const m = String(updateData.calificacionModo).trim().toUpperCase();
             if (m === 'ESTANDAR' || m === 'ESTRATEGICO') {
-                updateData.residualModo = m;
+                updateData.calificacionModo = m;
             } else {
-                delete updateData.residualModo;
+                delete updateData.calificacionModo;
             }
         }
 
@@ -597,7 +597,7 @@ export const updateProceso = async (req: Request, res: Response) => {
         };
 
         let proceso: any;
-        let residualModoPersistidoEnBd = true;
+        let calificacionModoPersistidoEnBd = true;
 
         try {
             proceso = await prisma.proceso.update({
@@ -607,11 +607,11 @@ export const updateProceso = async (req: Request, res: Response) => {
             });
         } catch (firstUp: unknown) {
             if (!isPrismaSchemaColumnMissing(firstUp)) throw firstUp;
-            const { residualModo: _omitResidual, ...updateSinResidual } = updateData;
-            if (updateData.residualModo !== undefined) {
-                residualModoPersistidoEnBd = false;
+            const { calificacionModo: _omitResidual, ...updateSinResidual } = updateData;
+            if (updateData.calificacionModo !== undefined) {
+                calificacionModoPersistidoEnBd = false;
                 console.warn(
-                    '[procesos/updateProceso] La BD no tiene columna residualModo; no se puede guardar modo estratégico hasta migrar. Ejecute: npx prisma migrate deploy'
+                    '[procesos/updateProceso] La BD no tiene columna calificacionModo; no se puede guardar modo estratégico hasta migrar. Ejecute: npx prisma migrate deploy'
                 );
             }
             proceso = await prisma.proceso.update({
@@ -621,7 +621,7 @@ export const updateProceso = async (req: Request, res: Response) => {
                 // eslint-disable-next-line @typescript-eslint/no-explicit-any
                 select: PROCESO_UPDATE_SELECT_SIN_RESIDUAL as any,
             });
-            proceso.residualModo = 'ESTANDAR';
+            proceso.calificacionModo = 'ESTANDAR';
         }
 
         // Invalidar caché de este proceso y del listado general para que el frontend vea los cambios al instante
@@ -634,9 +634,9 @@ export const updateProceso = async (req: Request, res: Response) => {
         }
 
         if (
-            residualModoPersistidoEnBd &&
-            updateData.residualModo !== undefined &&
-            updateData.residualModo !== procesoAnterior?.residualModo
+            calificacionModoPersistidoEnBd &&
+            updateData.calificacionModo !== undefined &&
+            updateData.calificacionModo !== procesoAnterior?.calificacionModo
         ) {
             const riesgosProceso = await prisma.riesgo.findMany({
                 where: { procesoId: id },

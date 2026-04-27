@@ -106,8 +106,8 @@ model Proceso {
   documentoFlujoGramaNombre      String?
   documentoFlujoGramaUrl         String?
   gerenciaId                     Int?
-  /// ESTANDAR: recálculo residual con ControlRiesgo numérico. ESTRATEGICO: criterios MA (CWR / Anexo 6).
-  residualModo                   String               @default("ESTANDAR") @db.VarChar(20)
+  /// ESTANDAR: recálculo de calificación con ControlRiesgo numérico. ESTRATEGICO: criterios MA (CWR / Anexo 6).
+  calificacionModo              String               @default("ESTANDAR") @db.VarChar(20)
   contextos                      Contexto[]
   contextoItems                  ContextoItem[]
   dofaItems                      DofaItem[]

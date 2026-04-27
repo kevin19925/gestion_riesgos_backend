@@ -13,6 +13,7 @@ import { recalcularResidualEstrategicoPorRiesgo } from './estrategicoResidual.se
 import {
   debeForzarResidualIgualInherentePorPlanesCausa,
   getReglaResidualIgualInherenteSiPlanCausa,
+  listarRiesgoIdsConCausaPlanSinControl,
   listarRiesgoIdsConPlanEnCausa,
 } from './reglaResidualPlanCausa.service';
 
@@ -292,9 +293,7 @@ export async function recalcularTodosLosRiesgosResiduales(
     console.log(`${LOG_PREFIX} Inicio recálculo (config id=${config.id}). Preview=${preview}`);
 
     const reglaPlanCausaActiva = await getReglaResidualIgualInherenteSiPlanCausa();
-    const riesgosIdsConPlanEnCausa = reglaPlanCausaActiva
-      ? await listarRiesgoIdsConPlanEnCausa()
-      : new Set<number>();
+    const todosRiesgosConPlanEnCausa = await listarRiesgoIdsConPlanEnCausa();
 
     const frecuenciasCatalog = await prisma.frecuenciaCatalog.findMany().then(rows =>
       rows.map(r => ({ id: r.id, label: r.label, peso: r.peso }))
@@ -323,11 +322,6 @@ export async function recalcularTodosLosRiesgosResiduales(
       try {
         if (causa.riesgo?.proceso?.calificacionModo === 'ESTRATEGICO') {
           riesgosEstrategicos.add(causa.riesgoId);
-          continue;
-        }
-        if (riesgosIdsConPlanEnCausa.has(causa.riesgoId)) {
-          riesgosAfectados.add(causa.riesgoId);
-          resultado.causasActualizadas++;
           continue;
         }
         for (const control of causa.controles) {
@@ -369,6 +363,31 @@ export async function recalcularTodosLosRiesgosResiduales(
       }
     }
 
+    const idsEvaluacionResidual = new Set<number>(riesgosAfectados);
+    if (reglaPlanCausaActiva) {
+      const forzarIds = await listarRiesgoIdsConCausaPlanSinControl();
+      for (const id of forzarIds) idsEvaluacionResidual.add(id);
+    } else {
+      for (const id of todosRiesgosConPlanEnCausa) idsEvaluacionResidual.add(id);
+    }
+
+    const candidatosEvalIds = Array.from(new Set<number>([...idsEvaluacionResidual, ...riesgosEstrategicos]));
+    let estandarEvalIds: number[] = [];
+    if (candidatosEvalIds.length > 0) {
+      const modosRows = await prisma.riesgo.findMany({
+        where: { id: { in: candidatosEvalIds } },
+        select: { id: true, proceso: { select: { calificacionModo: true } } },
+      });
+      for (const r of modosRows) {
+        if (r.proceso?.calificacionModo === 'ESTRATEGICO') {
+          riesgosEstrategicos.add(r.id);
+        }
+      }
+      estandarEvalIds = modosRows
+        .filter((r) => r.proceso?.calificacionModo !== 'ESTRATEGICO' && idsEvaluacionResidual.has(r.id))
+        .map((r) => r.id);
+    }
+
     // Guardar controles en lotes
     if (!preview && actualizacionesControles.length > 0) {
       const TAMANO_LOTE = 50;
@@ -386,17 +405,15 @@ export async function recalcularTodosLosRiesgosResiduales(
       }
     }
 
-    // Actualizar EvaluacionRiesgo de todos los riesgos (estándar) + motor CWR para estratégicos
+    // Actualizar EvaluacionRiesgo (estándar) + motor CWR para estratégicos
     if (!preview) {
-      const todosRiesgoIds = Array.from(riesgosAfectados);
-      console.log(`${LOG_PREFIX} Actualizando EvaluacionRiesgo para ${todosRiesgoIds.length} riesgos...`);
+      console.log(`${LOG_PREFIX} Actualizando EvaluacionRiesgo (estándar) para ${estandarEvalIds.length} riesgos...`);
 
       const LOTE_EVAL = 25;
-      for (let i = 0; i < todosRiesgoIds.length; i += LOTE_EVAL) {
-        const loteIds = todosRiesgoIds.slice(i, i + LOTE_EVAL);
+      for (let i = 0; i < estandarEvalIds.length; i += LOTE_EVAL) {
+        const loteIds = estandarEvalIds.slice(i, i + LOTE_EVAL);
         await Promise.all(loteIds.map((riesgoId) => actualizarEvaluacionRiesgo(riesgoId)));
       }
-      resultado.riesgosActualizados = todosRiesgoIds.length;
 
       const estrategicos = Array.from(riesgosEstrategicos);
       if (estrategicos.length > 0) {
@@ -405,8 +422,11 @@ export async function recalcularTodosLosRiesgosResiduales(
           const lote = estrategicos.slice(i, i + LOTE_EVAL);
           await Promise.all(lote.map((riesgoId) => recalcularResidualEstrategicoPorRiesgo(riesgoId)));
         }
-        resultado.riesgosActualizados += estrategicos.length;
       }
+
+      const idsProcesados = new Set<number>(estandarEvalIds);
+      for (const id of estrategicos) idsProcesados.add(id);
+      resultado.riesgosActualizados = idsProcesados.size;
     }
 
     console.log(`${LOG_PREFIX} Fin: ${resultado.controlesActualizados} controles actualizados, ${resultado.riesgosActualizados} riesgos con mapa residual actualizado.`);

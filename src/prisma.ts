@@ -22,17 +22,9 @@ const pool = new Pool({
     }
 });
 
-// Logs del pool para monitoreo
-pool.on('connect', () => {
-    console.log('✅ Prisma conectó un nuevo cliente al Pool');
-});
-
+// Logs del pool para monitoreo: solo errores
 pool.on('error', (err) => {
-    console.error('❌ Error en el Pool de Postgres:', err);
-});
-
-pool.on('remove', () => {
-    console.log('🔌 Cliente removido del Pool');
+    console.error('[POOL] Error en conexión Postgres:', err);
 });
 
 // Adaptador de Prisma con el pool configurado
@@ -50,12 +42,11 @@ const prisma = globalForPrisma.prisma || new PrismaClient({
     ],
 });
 
-// Query logging: solo consultas lentas (> 800ms) para no ralentizar en producción
-const SLOW_QUERY_MS = 800;
+// Query logging: solo consultas lentas (>500ms)
+const SLOW_QUERY_MS = 500;
 prisma.$on('query' as never, (e: any) => {
     if (e.duration > SLOW_QUERY_MS) {
-        console.warn(`⚠️ CONSULTA LENTA (${e.duration}ms):`, e.query?.substring?.(0, 120) + '...');
-        console.log(`📊 Pool Stats - Total: ${pool.totalCount}, Activas: ${pool.totalCount - pool.idleCount}, Inactivas: ${pool.idleCount}, Esperando: ${pool.waitingCount}`);
+        console.warn(`[SLOW QUERY] ${e.duration}ms |`, e.query?.substring?.(0, 120));
     }
 });
 
@@ -64,12 +55,10 @@ if (process.env.NODE_ENV !== 'production') {
     globalForPrisma.prisma = prisma;
 }
 
-// Graceful shutdown: cerrar conexiones al terminar el proceso
+// Graceful shutdown
 process.on('beforeExit', async () => {
-    console.log('🔄 Cerrando conexiones de Prisma...');
     await prisma.$disconnect();
     await pool.end();
-    console.log('✅ Conexiones cerradas correctamente');
 });
 
 export default prisma;

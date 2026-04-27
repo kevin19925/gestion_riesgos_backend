@@ -36,7 +36,6 @@ export function authMiddleware(options?: { required?: boolean; publicPaths?: str
 
     if (!token) {
       if (required) {
-        console.log('❌ [AUTH] Token no proporcionado para:', path);
         return res.status(401).json({ error: 'No autorizado', message: 'Token requerido' });
       }
       return next();
@@ -45,7 +44,6 @@ export function authMiddleware(options?: { required?: boolean; publicPaths?: str
     const payload = verifyToken(token);
     if (!payload) {
       if (required) {
-        console.log('❌ [AUTH] Token inválido o expirado para:', path);
         return res.status(401).json({ error: 'No autorizado', message: 'Token inválido o expirado' });
       }
       return next();

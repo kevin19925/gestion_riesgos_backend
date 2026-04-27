@@ -6,6 +6,7 @@ import compression from 'compression';
 import { authMiddleware } from './middleware/auth';
 import { auditMiddleware } from './middleware/audit.middleware';
 import routes from './routes';
+import { fullTextSanitize } from './utils/normalizeTextoUi';
 
 const app = express();
 
@@ -25,12 +26,33 @@ app.use(
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
-// JSON siempre UTF-8 explícito (evita proxies/clientes que asumen Latin-1)
+function sanitizeJsonPayload(value: unknown): unknown {
+  if (value instanceof Date) {
+    return value.toISOString();
+  }
+  if (typeof value === 'string') {
+    return fullTextSanitize(value);
+  }
+  if (Array.isArray(value)) {
+    return value.map((item) => sanitizeJsonPayload(item));
+  }
+  if (value && typeof value === 'object') {
+    const entries = Object.entries(value as Record<string, unknown>);
+    const normalized: Record<string, unknown> = {};
+    for (const [k, v] of entries) {
+      normalized[k] = sanitizeJsonPayload(v);
+    }
+    return normalized;
+  }
+  return value;
+}
+
+// JSON siempre UTF-8 explícito + saneamiento global de texto (evita mojibake en toda la app)
 app.use((_req, res, next) => {
   const sendJson = res.json.bind(res);
   res.json = (body?: unknown) => {
     res.setHeader('Content-Type', 'application/json; charset=utf-8');
-    return sendJson(body);
+    return sendJson(sanitizeJsonPayload(body));
   };
   next();
 });

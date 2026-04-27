@@ -8,7 +8,7 @@ import * as auditService from '../services/audit.service';
 import prisma from '../prisma';
 import { isPrismaSchemaColumnMissing } from '../utils/prismaErrors';
 
-/** Snapshot para auditoría sin columnas que puedan faltar en BD (p. ej. residualModo antes de migrar). */
+/** Snapshot para auditoría sin columnas que puedan faltar en BD (p. ej. calificacionModo antes de migrar). */
 const PROCESO_AUDIT_SELECT = {
   id: true,
   nombre: true,
@@ -92,14 +92,14 @@ export function auditMiddleware() {
 
     // Capturar datos anteriores para UPDATE y DELETE
     let datosAnteriores: any = null;
-    
+
     // Obtener el ID de la URL (puede estar en params o en la ruta)
     let registroId: number | null = null;
-    
+
     // Intentar obtener de req.params primero
     if (req.params.id) {
       registroId = Number(req.params.id);
-    } 
+    }
     // Si no está en params, intentar extraer de la URL
     else {
       const pathParaId = (req.originalUrl || req.url || req.path || '').split('?')[0];
@@ -109,26 +109,11 @@ export function auditMiddleware() {
       }
     }
 
-    console.log('🔍 [AUDIT] Verificando si obtener datos anteriores:', {
-      accion,
-      registroId,
-      path: pathParaAudit,
-      params: req.params,
-      tieneId: !!registroId,
-      esUpdateODelete: accion === 'UPDATE' || accion === 'DELETE',
-    });
-
     if ((accion === 'UPDATE' || accion === 'DELETE') && registroId) {
-      console.log('📥 [AUDIT] Obteniendo datos anteriores para:', tabla, registroId);
       try {
-        // Intentar obtener el registro anterior
         datosAnteriores = await obtenerRegistroAnterior(tabla, registroId);
-        console.log('✅ [AUDIT] Datos anteriores obtenidos:', datosAnteriores ? 'Sí' : 'No');
-        if (datosAnteriores) {
-          console.log('📄 [AUDIT] Campos en datos anteriores:', Object.keys(datosAnteriores).length);
-        }
       } catch (error) {
-        console.error('❌ [AUDIT] Error obteniendo datos anteriores:', error);
+        console.error('[AUDIT] Error obteniendo datos anteriores:', error);
       }
     }
 
@@ -137,30 +122,18 @@ export function auditMiddleware() {
     res.json = function (body: any) {
       // Solo registrar si la operación fue exitosa (2xx)
       if (res.statusCode >= 200 && res.statusCode < 300) {
-        console.log('✅ [AUDIT] Respuesta exitosa, registrando auditoría...');
-        
         // Ejecutar el registro de auditoría de forma asíncrona (no bloqueante)
         setImmediate(async () => {
           try {
             const registroIdFinal = registroId || body?.id || body?.data?.id;
             const datosNuevos = body?.data || body;
 
-            console.log('📝 [AUDIT] Datos a registrar:', {
-              usuario: usuarioNombre,
-              accion,
-              tabla,
-              registroId: registroIdFinal,
-            });
-
             // Calcular cambios para UPDATE
             let cambios = null;
             if (accion === 'UPDATE' && datosAnteriores && datosNuevos) {
               cambios = auditService.calcularCambios(datosAnteriores, datosNuevos);
-              console.log('🔄 [AUDIT] Cambios detectados:', cambios ? Object.keys(cambios).length : 0);
-              
               // Si no hay cambios, no registrar auditoría
               if (!cambios || Object.keys(cambios).length === 0) {
-                console.log('⏭️ [AUDIT] No hay cambios, saltando registro de auditoría');
                 return;
               }
             }
@@ -187,15 +160,11 @@ export function auditMiddleware() {
               ipAddress: obtenerIP(req),
               userAgent: req.get('user-agent'),
             });
-            
-            console.log('✅ [AUDIT] Auditoría registrada exitosamente');
           } catch (error) {
             // No lanzar error para no afectar la respuesta al cliente
-            console.error('❌ [AUDIT] Error registrando auditoría:', error);
+            console.error('[AUDIT] Error registrando auditoría:', error);
           }
         });
-      } else {
-        console.log('⚠️ [AUDIT] Respuesta no exitosa, no se registra:', res.statusCode);
       }
 
       return originalJson(body);
@@ -242,7 +211,7 @@ async function obtenerRegistroAnterior(tabla: string, id: number): Promise<any> 
       try {
         return await prisma.proceso.findUnique({
           where: { id },
-          select: { ...PROCESO_AUDIT_SELECT, residualModo: true },
+          select: { ...PROCESO_AUDIT_SELECT, calificacionModo: true },
         });
       } catch (first: unknown) {
         if (!isPrismaSchemaColumnMissing(first)) throw first;
