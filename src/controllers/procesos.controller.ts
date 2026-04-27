@@ -4,6 +4,14 @@ import { getDeleteErrorMessage, isPrismaSchemaColumnMissing } from '../utils/pri
 import { redisGet, redisSet, redisDel } from '../redisClient';
 import { recalcularResidualPorRiesgo } from '../services/recalculoResidual.service';
 
+/** Normaliza modo residual estándar vs estratégico (DTO frontend y columna BD). */
+function normalizarModoResidual(v: unknown): 'ESTANDAR' | 'ESTRATEGICO' {
+    const s = String(v ?? '')
+        .trim()
+        .toUpperCase();
+    return s === 'ESTRATEGICO' ? 'ESTRATEGICO' : 'ESTANDAR';
+}
+
 /** Select de listado sin `calificacionModo` (fallback si la migración aún no está en BD). */
 const PROCESO_LIST_SELECT_BASE = {
     id: true,
@@ -216,7 +224,13 @@ export const getProcesos = async (req: Request, res: Response) => {
         // OPTIMIZADO: Caché Redis para reducir queries repetidas
         const cacheKey = 'procesos:all';
         const cached = await redisGet<any>(cacheKey);
-        if (cached) return res.json(cached);
+        if (cached && Array.isArray(cached)) {
+            const enriched = cached.map((p: any) => {
+                const modoR = normalizarModoResidual(p?.calificacionModo ?? p?.residualModo);
+                return { ...p, calificacionModo: modoR, residualModo: modoR };
+            });
+            return res.json(enriched);
+        }
 
         let procesos: any[];
         try {
@@ -256,12 +270,15 @@ export const getProcesos = async (req: Request, res: Response) => {
                 })
                 .filter(Boolean);
 
+            const modoR = normalizarModoResidual(p.calificacionModo);
             return {
                 ...p,
                 areaNombre: p.area?.nombre || null,
                 gerenciaNombre: p.gerencia?.nombre || null,
                 responsablesList,
-                calificacionModo: p.calificacionModo ?? 'ESTANDAR',
+                calificacionModo: modoR,
+                /** Alias esperado por el frontend (p. ej. Residual estratégico CWR). */
+                residualModo: modoR,
             };
         });
 
@@ -299,7 +316,10 @@ export const getProcesoById = async (req: Request, res: Response) => {
         // OPTIMIZADO: Caché por proceso individual
         const cacheKey = `proceso:${procesoId}`;
         const cached = await redisGet<any>(cacheKey);
-        if (cached) return res.json(cached);
+        if (cached) {
+            const modoCached = normalizarModoResidual(cached.calificacionModo ?? cached.residualModo);
+            return res.json({ ...cached, calificacionModo: modoCached, residualModo: modoCached });
+        }
 
         const selectFull = {
             ...PROCESO_BY_ID_SELECT_NO_RESIDUAL,
@@ -329,10 +349,13 @@ export const getProcesoById = async (req: Request, res: Response) => {
         }
         if (!proceso) return res.status(404).json({ error: 'Proceso not found' });
 
-        // OPTIMIZADO: Cachear por 5 minutos
-        await redisSet(cacheKey, proceso, 300);
+        const modoR = normalizarModoResidual(proceso.calificacionModo);
+        const procesoOut = { ...proceso, calificacionModo: modoR, residualModo: modoR };
 
-        res.json(proceso);
+        // OPTIMIZADO: Cachear por 5 minutos
+        await redisSet(cacheKey, procesoOut, 300);
+
+        res.json(procesoOut);
     } catch (error: any) {
         console.error('[procesos/getProcesoById]', error?.message ?? error);
         res.status(500).json({
@@ -365,6 +388,12 @@ export const createProceso = async (req: Request, res: Response) => {
 
         if (req.body.calificacionModo !== undefined) {
             const m = String(req.body.calificacionModo).trim().toUpperCase();
+            if (m === 'ESTANDAR' || m === 'ESTRATEGICO') {
+                (data as any).calificacionModo = m;
+            }
+        }
+        if (req.body.residualModo !== undefined) {
+            const m = String(req.body.residualModo).trim().toUpperCase();
             if (m === 'ESTANDAR' || m === 'ESTRATEGICO') {
                 (data as any).calificacionModo = m;
             }
@@ -432,6 +461,15 @@ export const updateProceso = async (req: Request, res: Response) => {
         if (updateData.objetivoProceso !== undefined) {
             updateData.objetivo = updateData.objetivoProceso;
             delete updateData.objetivoProceso;
+        }
+
+        // Alias DTO frontend: residualModo → calificacionModo (columna Prisma). Sin esto Prisma rechaza el update (500).
+        if (updateData.residualModo !== undefined) {
+            const m = String(updateData.residualModo).trim().toUpperCase();
+            if (m === 'ESTANDAR' || m === 'ESTRATEGICO') {
+                updateData.calificacionModo = m;
+            }
+            delete updateData.residualModo;
         }
 
         // Asegurar que sigla se guarde en mayúsculas
@@ -721,9 +759,16 @@ export const updateProceso = async (req: Request, res: Response) => {
             }
         }
 
-        res.json(proceso);
+        const modoR = normalizarModoResidual(proceso.calificacionModo);
+        res.json({ ...proceso, calificacionModo: modoR, residualModo: modoR });
     } catch (error) {
-        res.status(500).json({ error: 'Error updating proceso' });
+        console.error('[procesos/updateProceso]', error instanceof Error ? error.message : error);
+        res.status(500).json({
+            error: 'Error updating proceso',
+            ...(process.env.NODE_ENV !== 'production' && {
+                details: error instanceof Error ? error.message : String(error),
+            }),
+        });
     }
 };
 
