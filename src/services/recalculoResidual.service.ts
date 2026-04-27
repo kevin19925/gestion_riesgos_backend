@@ -10,6 +10,11 @@
 
 import prisma from '../prisma';
 import { recalcularResidualEstrategicoPorRiesgo } from './estrategicoResidual.service';
+import {
+  debeForzarResidualIgualInherentePorPlanesCausa,
+  getReglaResidualIgualInherenteSiPlanCausa,
+  listarRiesgoIdsConPlanEnCausa,
+} from './reglaResidualPlanCausa.service';
 
 const LOG_PREFIX = '[RecalcResidual]';
 import {
@@ -53,19 +58,19 @@ function determinarEvaluacionPreliminar(
   rangos: any[]
 ): string {
   for (const rango of rangos) {
-    const cumpleMinimo = rango.incluirMinimo 
-      ? puntajeTotal >= rango.valorMinimo 
+    const cumpleMinimo = rango.incluirMinimo
+      ? puntajeTotal >= rango.valorMinimo
       : puntajeTotal > rango.valorMinimo;
-    
-    const cumpleMaximo = rango.incluirMaximo 
-      ? puntajeTotal <= rango.valorMaximo 
+
+    const cumpleMaximo = rango.incluirMaximo
+      ? puntajeTotal <= rango.valorMaximo
       : puntajeTotal < rango.valorMaximo;
-    
+
     if (cumpleMinimo && cumpleMaximo) {
       return rango.nivelNombre;
     }
   }
-  
+
   return 'Inefectivo';
 }
 
@@ -79,11 +84,11 @@ function determinarEvaluacionDefinitiva(
   if (desviaciones === 3) { // C
     return 'Inefectivo';
   }
-  
+
   if (desviaciones === 2 && evaluacionPreliminar === 'Altamente Efectivo') { // B
     return 'Efectivo';
   }
-  
+
   return evaluacionPreliminar;
 }
 
@@ -95,19 +100,19 @@ function determinarNivelRiesgoResidual(
   rangos: any[]
 ): string {
   for (const rango of rangos) {
-    const cumpleMinimo = rango.incluirMinimo 
-      ? calificacionResidual >= rango.valorMinimo 
+    const cumpleMinimo = rango.incluirMinimo
+      ? calificacionResidual >= rango.valorMinimo
       : calificacionResidual > rango.valorMinimo;
-    
-    const cumpleMaximo = rango.incluirMaximo 
-      ? calificacionResidual <= rango.valorMaximo 
+
+    const cumpleMaximo = rango.incluirMaximo
+      ? calificacionResidual <= rango.valorMaximo
       : calificacionResidual < rango.valorMaximo;
-    
+
     if (cumpleMinimo && cumpleMaximo) {
       return rango.nivelNombre;
     }
   }
-  
+
   return 'NIVEL BAJO';
 }
 
@@ -193,7 +198,7 @@ async function recalcularControl(
     segregacion: control.segregacion || 0,
     naturaleza: control.naturaleza || 0,
   };
-  
+
   const puntajeTotal = calcularPuntajeTotal(puntajes, pesos);
 
   // 2. Evaluación preliminar
@@ -283,8 +288,13 @@ export async function recalcularTodosLosRiesgosResiduales(
     const tablaMitigacion = await getTablaMitigacion();
     const rangosNivelRiesgo = await getRangosNivelRiesgo();
     const porcentajeDimensionCruzada = await getPorcentajeDimensionCruzada();
-    
+
     console.log(`${LOG_PREFIX} Inicio recálculo (config id=${config.id}). Preview=${preview}`);
+
+    const reglaPlanCausaActiva = await getReglaResidualIgualInherenteSiPlanCausa();
+    const riesgosIdsConPlanEnCausa = reglaPlanCausaActiva
+      ? await listarRiesgoIdsConPlanEnCausa()
+      : new Set<number>();
 
     const frecuenciasCatalog = await prisma.frecuenciaCatalog.findMany().then(rows =>
       rows.map(r => ({ id: r.id, label: r.label, peso: r.peso }))
@@ -311,8 +321,13 @@ export async function recalcularTodosLosRiesgosResiduales(
 
     for (const causa of causasConControles) {
       try {
-        if (causa.riesgo?.proceso?.residualModo === 'ESTRATEGICO') {
+        if (causa.riesgo?.proceso?.calificacionModo === 'ESTRATEGICO') {
           riesgosEstrategicos.add(causa.riesgoId);
+          continue;
+        }
+        if (riesgosIdsConPlanEnCausa.has(causa.riesgoId)) {
+          riesgosAfectados.add(causa.riesgoId);
+          resultado.causasActualizadas++;
           continue;
         }
         for (const control of causa.controles) {
@@ -330,7 +345,7 @@ export async function recalcularTodosLosRiesgosResiduales(
           if (recalculo) {
             resultado.detalles.push(recalculo);
             riesgosAfectados.add(recalculo.riesgoId);
-            
+
             console.log(
               `${LOG_PREFIX} Control ${recalculo.controlId} (causa ${recalculo.causaId}, riesgo ${recalculo.riesgoId}): ` +
               `Frecuencia residual=${recalculo.valoresResiduales.frecuenciaResidual} ` +
@@ -375,7 +390,7 @@ export async function recalcularTodosLosRiesgosResiduales(
     if (!preview) {
       const todosRiesgoIds = Array.from(riesgosAfectados);
       console.log(`${LOG_PREFIX} Actualizando EvaluacionRiesgo para ${todosRiesgoIds.length} riesgos...`);
-      
+
       const LOTE_EVAL = 25;
       for (let i = 0; i < todosRiesgoIds.length; i += LOTE_EVAL) {
         const loteIds = todosRiesgoIds.slice(i, i + LOTE_EVAL);
@@ -412,6 +427,23 @@ async function actualizarEvaluacionRiesgo(riesgoId: number) {
   });
   if (!evaluacion) return;
 
+  if (await debeForzarResidualIgualInherentePorPlanesCausa(riesgoId)) {
+    const probabilidadResidual = evaluacion.probabilidad ?? 1;
+    const impactoResidual = evaluacion.impactoGlobal ?? 1;
+    const riesgoResidualNum = Number(evaluacion.riesgoInherente ?? probabilidadResidual * impactoResidual);
+    const nivelRiesgoResidual = evaluacion.nivelRiesgo ?? 'NIVEL BAJO';
+    await prisma.evaluacionRiesgo.updateMany({
+      where: { riesgoId },
+      data: {
+        probabilidadResidual: Math.round(probabilidadResidual),
+        impactoResidual: Math.round(impactoResidual),
+        riesgoResidual: riesgoResidualNum,
+        nivelRiesgoResidual,
+      },
+    });
+    return;
+  }
+
   // Obtener todas las causas con controles de este riesgo
   const causasConControles = await prisma.causaRiesgo.findMany({
     where: {
@@ -445,7 +477,7 @@ async function actualizarEvaluacionRiesgo(riesgoId: number) {
     // Nota: Los valores residuales por control no se guardan en ControlRiesgo
     // Se calculan on-the-fly. Para optimizar, podrías agregar campos a ControlRiesgo
     // o calcularlos aquí mismo.
-    
+
     // Por ahora, usar valores inherentes como fallback
     probabilidadResidual = evaluacion.probabilidad ?? 1;
     impactoResidual = evaluacion.impactoGlobal ?? 1;
@@ -470,10 +502,15 @@ async function actualizarEvaluacionRiesgo(riesgoId: number) {
 export async function recalcularResidualPorRiesgo(riesgoId: number): Promise<void> {
   const riesgoModo = await prisma.riesgo.findUnique({
     where: { id: riesgoId },
-    select: { proceso: { select: { residualModo: true } } },
+    select: { proceso: { select: { calificacionModo: true } } },
   });
-  if (riesgoModo?.proceso?.residualModo === 'ESTRATEGICO') {
+  if (riesgoModo?.proceso?.calificacionModo === 'ESTRATEGICO') {
     await recalcularResidualEstrategicoPorRiesgo(riesgoId);
+    return;
+  }
+
+  if (await debeForzarResidualIgualInherentePorPlanesCausa(riesgoId)) {
+    await actualizarEvaluacionRiesgo(riesgoId);
     return;
   }
 
@@ -512,7 +549,7 @@ export async function recalcularResidualPorRiesgo(riesgoId: number): Promise<voi
           porcentajeDimensionCruzada,
           frecuenciasCatalog
         );
-        
+
         if (recalculo) {
           await prisma.controlRiesgo.update({
             where: { id: recalculo.controlId },

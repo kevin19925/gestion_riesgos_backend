@@ -9,6 +9,7 @@ import {
   normalizarTipoMitigacionAnexo,
 } from './estrategicoResidual.engine';
 import { getStrategicEngineConfigResolved } from './estrategicoResidualConfig.service';
+import { debeForzarResidualIgualInherentePorPlanesCausa } from './reglaResidualPlanCausa.service';
 
 const LOG_PREFIX = '[ResidualEstrategico]';
 const CLAS_POS = 'Riesgo con consecuencia positiva';
@@ -92,7 +93,7 @@ export async function recalcularResidualEstrategicoPorRiesgo(riesgoId: number): 
   });
 
   if (!riesgo?.evaluacion || !riesgo.proceso) return;
-  if (riesgo.proceso.residualModo !== 'ESTRATEGICO') return;
+  if (riesgo.proceso.calificacionModo !== 'ESTRATEGICO') return;
 
   await ensureEvaluacionRiesgoResidualColumnFloat();
 
@@ -108,6 +109,26 @@ export async function recalcularResidualEstrategicoPorRiesgo(riesgoId: number): 
         nivelRiesgoResidual: ev.nivelRiesgo || 'NIVEL BAJO',
       },
     });
+    return;
+  }
+
+  if (await debeForzarResidualIgualInherentePorPlanesCausa(riesgoId)) {
+    const riInh =
+      ev.riesgoInherente != null
+        ? Number(ev.riesgoInherente)
+        : Number(ev.probabilidad ?? 1) * Number(ev.impactoGlobal ?? 1);
+    await prisma.evaluacionRiesgo.update({
+      where: { riesgoId },
+      data: {
+        probabilidadResidual: ev.probabilidad,
+        impactoResidual: ev.impactoGlobal,
+        riesgoResidual: riInh,
+        nivelRiesgoResidual: ev.nivelRiesgo || 'Sin Calificar',
+      },
+    });
+    console.log(
+      `${LOG_PREFIX} Riesgo ${riesgoId}: regla plan-en-causa activa; residual = inherente (sin motor MA).`
+    );
     return;
   }
 
@@ -208,7 +229,7 @@ export async function recalcularTodosRiesgosEstrategicos(): Promise<{
   await ensureEvaluacionRiesgoResidualColumnFloat();
   const errores: string[] = [];
   const riesgos = await prisma.riesgo.findMany({
-    where: { proceso: { residualModo: 'ESTRATEGICO' } },
+    where: { proceso: { calificacionModo: 'ESTRATEGICO' } },
     select: { id: true },
   });
   const LOTE = 15;

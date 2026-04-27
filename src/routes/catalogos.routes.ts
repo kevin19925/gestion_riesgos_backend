@@ -10,6 +10,7 @@ import {
     createImpactoTipo, updateImpactoNiveles, deleteImpactoTipo,
     getSubtipos, createSubtipo, updateSubtipo, deleteSubtipo,
     getCamposHabilitacionUi, updateCamposHabilitacionUi,
+    getReglaResidualPlanCausa, updateReglaResidualPlanCausa,
 } from '../controllers/catalogos.controller';
 import { requireRoles } from '../middleware/auth';
 
@@ -46,6 +47,8 @@ router.get('/configuraciones', getConfiguraciones);
 router.post('/configuraciones', createConfiguracion);
 router.get('/campos-habilitacion-ui', getCamposHabilitacionUi);
 router.put('/campos-habilitacion-ui', requireRoles(['admin']), updateCamposHabilitacionUi);
+router.get('/regla-residual-plan-causa', getReglaResidualPlanCausa);
+router.put('/regla-residual-plan-causa', requireRoles(['admin']), updateReglaResidualPlanCausa);
 router.get('/mapa-config', getMapaConfig);
 
 router.get('/objetivos', getObjetivos);

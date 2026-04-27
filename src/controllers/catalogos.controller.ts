@@ -8,6 +8,10 @@ import {
     defaultUiCamposHabilitacion,
     getUiCamposHabilitacionFlags,
 } from '../services/uiCamposHabilitacion.service';
+import {
+    getReglaResidualIgualInherenteSiPlanCausa,
+    setReglaResidualIgualInherenteSiPlanCausa,
+} from '../services/reglaResidualPlanCausa.service';
 
 const CACHE_TTL_CATALOGOS = 300; // 5 minutos
 const CACHE_KEY_TIPOLOGIAS = 'catalogos:tipologias';
@@ -298,57 +302,36 @@ export const getFormulas = async (_req: Request, res: Response) => {
 };
 
 export const getFrecuencias = async (req: Request, res: Response) => {
-    const frecuencias = [
-        { id: '1', label: 'Raro', descripcion: 'mayor a anual' },
-        { id: '2', label: 'Improbable', descripcion: 'mayor a trimestral y hasta anual' },
-        { id: '3', label: 'Posible', descripcion: 'mayor a mensual y hasta trimestral' },
-        { id: '4', label: 'Probable', descripcion: 'mayor a diaria y hasta mensual' },
-        { id: '5', label: 'Esperado', descripcion: 'diaria o varias veces al día' },
-    ];
-        try {
-            const frecuencias = await prisma.frecuenciaCatalog.findMany({
-                orderBy: { id: 'asc' }
-            });
-            res.json(frecuencias);
-        } catch (error) {
-            res.status(500).json({ error: 'Error fetching frecuencias' });
-        }
+    try {
+        const frecuencias = await prisma.frecuenciaCatalog.findMany({
+            orderBy: { id: 'asc' }
+        });
+        res.json(frecuencias);
+    } catch (error) {
+        res.status(500).json({ error: 'Error fetching frecuencias' });
+    }
 };
 
 export const getFuentes = async (req: Request, res: Response) => {
-    const fuentes = [
-        { id: '1', codigo: '1', nombre: 'Personas' },
-        { id: '2', codigo: '2', nombre: 'Proceso' },
-        { id: '3', codigo: '3', nombre: 'Legal' },
-        { id: '4', codigo: '4', nombre: 'Infraestructura' },
-        { id: '5', codigo: '5', nombre: 'Externos' },
-    ];
-        try {
-            const fuentes = await prisma.fuenteCatalog.findMany({
-                orderBy: { id: 'asc' }
-            });
-            res.json(fuentes);
-        } catch (error) {
-            res.status(500).json({ error: 'Error fetching fuentes' });
-        }
+    try {
+        const fuentes = await prisma.fuenteCatalog.findMany({
+            orderBy: { id: 'asc' }
+        });
+        res.json(fuentes);
+    } catch (error) {
+        res.status(500).json({ error: 'Error fetching fuentes' });
+    }
 };
 
 export const getOrigenes = async (req: Request, res: Response) => {
-    const origenes = [
-        { id: '1', codigo: '1', nombre: 'Talleres internos' },
-        { id: '2', codigo: '2', nombre: 'Auditoría HHI' },
-        { id: '3', codigo: '3', nombre: 'Auditorías Externas' },
-        { id: '4', codigo: '4', nombre: 'SGSI' },
-        { id: '5', codigo: '5', nombre: 'SSO' },
-    ];
-        try {
-            const origenes = await prisma.origenCatalog.findMany({
-                orderBy: { id: 'asc' }
-            });
-            res.json(origenes);
-        } catch (error) {
-            res.status(500).json({ error: 'Error fetching origenes' });
-        }
+    try {
+        const origenes = await prisma.origenCatalog.findMany({
+            orderBy: { id: 'asc' }
+        });
+        res.json(origenes);
+    } catch (error) {
+        res.status(500).json({ error: 'Error fetching origenes' });
+    }
 };
 
 export const getTiposProceso = async (req: Request, res: Response) => {
@@ -363,18 +346,14 @@ export const getTiposProceso = async (req: Request, res: Response) => {
 };
 
 export const getConsecuencias = async (req: Request, res: Response) => {
-    const consecuencias = [
-        { id: '1', codigo: '1', nombre: 'Negativa' },
-        { id: '2', codigo: '2', nombre: 'Positiva' },
-    ];
-        try {
-            const consecuencias = await prisma.consecuenciaCatalog.findMany({
-                orderBy: { id: 'asc' }
-            });
-            res.json(consecuencias);
-        } catch (error) {
-            res.status(500).json({ error: 'Error fetching consecuencias' });
-        }
+    try {
+        const consecuencias = await prisma.consecuenciaCatalog.findMany({
+            orderBy: { id: 'asc' }
+        });
+        res.json(consecuencias);
+    } catch (error) {
+        res.status(500).json({ error: 'Error fetching consecuencias' });
+    }
 };
 
 export const getNivelesRiesgo = async (req: Request, res: Response) => {
@@ -708,6 +687,30 @@ export const getCamposHabilitacionUi = async (_req: Request, res: Response) => {
         return res.json(merged);
     } catch (error) {
         res.status(500).json({ error: 'Error al leer habilitación de campos UI' });
+    }
+};
+
+/** GET: regla “residual = inherente si hay plan en alguna causa” (cualquier usuario autenticado). */
+export const getReglaResidualPlanCausa = async (_req: Request, res: Response) => {
+    try {
+        const activa = await getReglaResidualIgualInherenteSiPlanCausa();
+        return res.json({ activa });
+    } catch (error) {
+        console.error('[catalogos/getReglaResidualPlanCausa]', (error as Error)?.message || error);
+        res.status(500).json({ error: 'Error al leer la regla residual / planes en causa' });
+    }
+};
+
+/** PUT solo admin: activa o desactiva la regla. */
+export const updateReglaResidualPlanCausa = async (req: Request, res: Response) => {
+    try {
+        const raw = (req.body as { activa?: unknown })?.activa;
+        const activa = raw === true || raw === 'true' || raw === 1 || raw === '1';
+        const out = await setReglaResidualIgualInherenteSiPlanCausa(activa);
+        return res.json(out);
+    } catch (error) {
+        console.error('[catalogos/updateReglaResidualPlanCausa]', (error as Error)?.message || error);
+        res.status(500).json({ error: 'Error al guardar la regla residual / planes en causa' });
     }
 };
 

@@ -5,6 +5,54 @@ import {
   UI_CAMPO_PLAN_FECHA_ESTIMADA_FINALIZACION,
   UI_CAMPO_PLAN_FECHA_FINALIZACION,
 } from "../services/uiCamposHabilitacion.service";
+import { recalcularResidualPorRiesgo } from "../services/recalculoResidual.service";
+
+type PlanEnlacesRecalculo = {
+  causaRiesgoId?: number | null;
+  riesgoId?: number | null;
+  incidenciaId?: number | null;
+};
+
+async function resolverRiesgoIdParaRecalculoResidual(
+  plan: PlanEnlacesRecalculo
+): Promise<number | null> {
+  if (plan.causaRiesgoId != null) {
+    const c = await prisma.causaRiesgo.findUnique({
+      where: { id: plan.causaRiesgoId },
+      select: { riesgoId: true },
+    });
+    return c?.riesgoId ?? null;
+  }
+  if (plan.riesgoId != null) return Number(plan.riesgoId);
+  if (plan.incidenciaId != null) {
+    const i = await prisma.incidencia.findUnique({
+      where: { id: plan.incidenciaId },
+      select: { riesgoId: true },
+    });
+    return i?.riesgoId != null ? Number(i.riesgoId) : null;
+  }
+  return null;
+}
+
+async function dispararRecalculoResidualPorPlanes(
+  prev: PlanEnlacesRecalculo | null,
+  next: PlanEnlacesRecalculo
+): Promise<void> {
+  const ids = new Set<number>();
+  if (prev) {
+    const a = await resolverRiesgoIdParaRecalculoResidual(prev);
+    if (a != null) ids.add(a);
+  }
+  const b = await resolverRiesgoIdParaRecalculoResidual(next);
+  if (b != null) ids.add(b);
+  for (const id of ids) {
+    try {
+      await recalcularResidualPorRiesgo(id);
+    } catch {
+      /* no bloquear guardado del plan */
+    }
+  }
+}
 
 function ymd(input: unknown): string | null {
   if (input == null || input === "") return null;
@@ -247,6 +295,8 @@ export const createPlan = async (req: Request, res: Response) => {
       },
     });
 
+    await dispararRecalculoResidualPorPlanes(null, plan);
+
     res.status(201).json(plan);
   } catch (error) {
     res.status(500).json({ error: "Error creating plan" });
@@ -371,6 +421,8 @@ export const updatePlan = async (req: Request, res: Response) => {
       },
     });
 
+    await dispararRecalculoResidualPorPlanes(existing, plan);
+
     res.json(plan);
   } catch (error) {
     if ((error as any).code === "P2025") {
@@ -384,9 +436,18 @@ export const deletePlan = async (req: Request, res: Response) => {
   try {
     const planId = Number(req.params.id);
 
+    const existing = await prisma.planAccion.findUnique({
+      where: { id: planId },
+    });
+    if (!existing) {
+      return res.status(404).json({ error: "No se encontró el plan de acción o ya fue eliminado." });
+    }
+
     await prisma.planAccion.delete({
       where: { id: planId },
     });
+
+    await dispararRecalculoResidualPorPlanes(existing, {});
 
     res.json({ message: "Plan deleted successfully" });
   } catch (error) {
