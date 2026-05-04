@@ -5,6 +5,16 @@
 import { Request, Response } from 'express';
 import prisma from '../prisma';
 
+/** Alinea con el contrato del API: director | proceso | ambos. Acepta sinónimos legacy del front antiguo. */
+function normalizarModoResponsable(m: unknown): string {
+    const s = String(m ?? '')
+        .toLowerCase()
+        .trim();
+    if (s === 'supervisor') return 'director';
+    if (s === 'dueño' || s === 'dueno') return 'proceso';
+    return s;
+}
+
 /**
  * GET /api/procesos/:procesoId/responsables
  * Obtener todos los responsables de un proceso
@@ -174,7 +184,7 @@ export const updateResponsablesProceso = async (req: Request, res: Response) => 
         if (Array.isArray(responsables)) {
             responsablesData = responsables.map((r: any) => ({
                 usuarioId: Number(r.usuarioId),
-                modo: r.modo
+                modo: normalizarModoResponsable(r.modo)
             }));
         } else if (Array.isArray(responsablesIds)) {
             // Formato antiguo no soportado - requiere modo
