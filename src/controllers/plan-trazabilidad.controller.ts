@@ -469,33 +469,36 @@ export const obtenerAlertasVencimiento = async (req: Request, res: Response) => 
       orderBy: { fechaGeneracion: 'desc' }
     });
 
-    // Formatear alertas con información del plan
-    const alertasFormateadas = alertas.map(alerta => {
-      const plan = alerta.causaRiesgo.planesAccion[0];
-      return {
-        id: alerta.id,
-        tipo: alerta.tipo,
-        diasRestantes: alerta.diasRestantes,
-        leida: alerta.leida,
-        fechaGeneracion: alerta.fechaGeneracion,
-        plan: {
-          causaId: alerta.causaRiesgoId,
-          descripcion: plan?.descripcion || alerta.causaRiesgo.descripcion,
-          responsable: plan?.responsable,
-          fechaEstimada: plan?.fechaFin,
-          estado: plan?.estado
-        },
-        riesgo: {
-          id: alerta.causaRiesgo.riesgo?.id,
-          numeroIdentificacion: (alerta.causaRiesgo.riesgo as any)?.numeroIdentificacion,
-          descripcion: alerta.causaRiesgo.riesgo?.descripcion
-        },
-        proceso: {
-          id: alerta.causaRiesgo.riesgo?.proceso?.id,
-          nombre: alerta.causaRiesgo.riesgo?.proceso?.nombre
-        }
-      };
-    });
+    // Formatear alertas con información del plan (cadena opcional por datos huérfanos o incompletos)
+    const alertasFormateadas = alertas
+      .filter((alerta) => alerta.causaRiesgo != null)
+      .map((alerta) => {
+        const causa = alerta.causaRiesgo;
+        const plan = causa.planesAccion?.[0];
+        return {
+          id: alerta.id,
+          tipo: alerta.tipo,
+          diasRestantes: alerta.diasRestantes,
+          leida: alerta.leida,
+          fechaGeneracion: alerta.fechaGeneracion,
+          plan: {
+            causaId: alerta.causaRiesgoId,
+            descripcion: plan?.descripcion || causa.descripcion,
+            responsable: plan?.responsable,
+            fechaEstimada: plan?.fechaFin,
+            estado: plan?.estado
+          },
+          riesgo: {
+            id: causa.riesgo?.id,
+            numeroIdentificacion: (causa.riesgo as { numeroIdentificacion?: string } | null | undefined)?.numeroIdentificacion,
+            descripcion: causa.riesgo?.descripcion
+          },
+          proceso: {
+            id: causa.riesgo?.proceso?.id,
+            nombre: causa.riesgo?.proceso?.nombre
+          }
+        };
+      });
 
     // Estadísticas
     const proximasAVencer = alertasFormateadas.filter(a => a.tipo === 'proximo').length;

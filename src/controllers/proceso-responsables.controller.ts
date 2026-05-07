@@ -22,7 +22,10 @@ function normalizarModoResponsable(m: unknown): string {
 export const getResponsablesByProceso = async (req: Request, res: Response) => {
     try {
         const procesoId = Number(req.params.procesoId);
-        
+        if (!Number.isFinite(procesoId) || procesoId < 1) {
+            return res.status(400).json({ error: 'procesoId inválido' });
+        }
+
         const responsables = await prisma.procesoResponsable.findMany({
             where: { procesoId },
             include: {
@@ -47,6 +50,7 @@ export const getResponsablesByProceso = async (req: Request, res: Response) => {
             createdAt: r.createdAt
         })));
     } catch (error) {
+        console.error('[getResponsablesByProceso]', error);
         res.status(500).json({ error: 'Error fetching responsables' });
     }
 };
@@ -71,7 +75,8 @@ export const addResponsableToProceso = async (req: Request, res: Response) => {
         
         // Verificar que el proceso existe
         const proceso = await prisma.proceso.findUnique({
-            where: { id: procesoId }
+            where: { id: procesoId },
+            select: { id: true }
         });
         
         if (!proceso) {
@@ -171,7 +176,8 @@ export const updateResponsablesProceso = async (req: Request, res: Response) => 
         
         // Verificar que el proceso existe
         const proceso = await prisma.proceso.findUnique({
-            where: { id: procesoId }
+            where: { id: procesoId },
+            select: { id: true }
         });
         
         if (!proceso) {

@@ -6,7 +6,6 @@
 import { Request, Response, NextFunction } from 'express';
 import * as auditService from '../services/audit.service';
 import prisma from '../prisma';
-import { isPrismaSchemaColumnMissing } from '../utils/prismaErrors';
 
 /** Snapshot para auditoría sin columnas que puedan faltar en BD (p. ej. calificacionModo antes de migrar). */
 const PROCESO_AUDIT_SELECT = {
@@ -208,19 +207,11 @@ async function obtenerRegistroAnterior(tabla: string, id: number): Promise<any> 
 
   try {
     if (tabla === 'Proceso') {
-      try {
-        return await prisma.proceso.findUnique({
-          where: { id },
-          select: { ...PROCESO_AUDIT_SELECT, calificacionModo: true },
-        });
-      } catch (first: unknown) {
-        if (!isPrismaSchemaColumnMissing(first)) throw first;
-        return await prisma.proceso.findUnique({
-          where: { id },
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          select: PROCESO_AUDIT_SELECT as any,
-        });
-      }
+      return await prisma.proceso.findUnique({
+        where: { id },
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        select: PROCESO_AUDIT_SELECT as any,
+      });
     }
     return await modelo.findUnique({ where: { id } });
   } catch (error) {

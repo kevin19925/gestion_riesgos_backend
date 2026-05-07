@@ -328,9 +328,19 @@ async function buildScreenContextMessage(screenContext: ScreenContext | undefine
 
   console.log('[CORA] Construyendo mensaje de contexto:', JSON.stringify(screenContext, null, 2)); // DEBUG
 
-  const { module, screen, action, processId, formData } = screenContext;
+  const { module, screen, action, processId, formData, route, menuPath, pantallaEtiqueta } =
+    screenContext;
 
   let contextMessage = `PANTALLA_ACTUAL:\n`;
+  if (route) {
+    contextMessage += `Ruta URL actual: ${route}\n`;
+  }
+  if (menuPath) {
+    contextMessage += `Ubicación en menú lateral: ${menuPath}\n`;
+  }
+  if (pantallaEtiqueta) {
+    contextMessage += `Pantalla (resumen): ${pantallaEtiqueta}\n`;
+  }
   contextMessage += `Módulo: ${module}\n`;
   contextMessage += `Pantalla: ${screen}\n`;
   contextMessage += `Acción: ${action === 'create' ? 'Creando nuevo' : action === 'edit' ? 'Editando' : 'Visualizando'}\n`;
@@ -1050,19 +1060,18 @@ export async function procesarMensajeIA(payload: IAUserMessagePayload): Promise<
       message,
     });
 
-    const updateMsgs = [
-      ...shortHistory,
+    const updatedMessages = [
+      ...(Array.isArray(conv.messages) ? conv.messages : []),
       { role: 'user', content: message, createdAt: now },
       { role: 'assistant', content: answer, createdAt: new Date() },
     ];
 
-    // Guardado asíncrono optimizado
-    conversaciones
-      .updateOne(
-        { _id: conv._id },
-        { $set: { updatedAt: new Date(), messages: updateMsgs.slice(-20) } },
-      )
-      .catch(console.error);
+    await conversaciones.updateOne(
+      { _id: conv._id },
+      {
+        $set: { updatedAt: new Date(), messages: updatedMessages },
+      },
+    );
 
     console.log(`[IA] Respuesta lista en ${Date.now() - t0}ms`);
     return { conversationId: String(conv._id), answer };
@@ -1279,18 +1288,18 @@ export async function procesarMensajeIAStream(
       }
     }
 
-    const updateMsgs = [
-      ...shortHistory,
+    const updatedMessages = [
+      ...(Array.isArray(conv.messages) ? conv.messages : []),
       { role: 'user', content: message, createdAt: now },
       { role: 'assistant', content: fullAnswer, createdAt: new Date() },
     ];
 
-    conversaciones
-      .updateOne(
-        { _id: conv._id },
-        { $set: { updatedAt: new Date(), messages: updateMsgs.slice(-20) } },
-      )
-      .catch(console.error);
+    await conversaciones.updateOne(
+      { _id: conv._id },
+      {
+        $set: { updatedAt: new Date(), messages: updatedMessages },
+      },
+    );
 
     console.log(`[IA] [stream] Respuesta lista en ${Date.now() - t0}ms`);
     return { conversationId: String(conv._id), answer: fullAnswer };
@@ -1307,8 +1316,7 @@ export async function obtenerConversacionesUsuario(userId: string) {
     { userId },
     { 
       projection: { title: 1, updatedAt: 1, messages: { $slice: -1 } },
-      sort: { updatedAt: -1 },
-      limit: 30 
+      sort: { updatedAt: -1 }
     }
   ).toArray();
 
@@ -1349,6 +1357,10 @@ export interface ScreenContext {
   riskId?: number;
   formData?: Record<string, any>;
   route?: string;
+  /** Texto equivalente en menú lateral (frontend). */
+  menuPath?: string;
+  /** Etiqueta corta de pantalla (frontend). */
+  pantallaEtiqueta?: string;
 }
 
 
