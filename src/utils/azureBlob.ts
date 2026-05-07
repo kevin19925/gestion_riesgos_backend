@@ -86,7 +86,8 @@ function blobNamePerfil(nombrePerfil: string, userId: number | string, extension
     .replace(/-+/g, '-')
     .slice(0, 60) || 'perfil';
   const ext = extension.startsWith('.') ? extension.slice(0, 6) : `.${extension.slice(0, 5)}`;
-  return `${userId}-${slug}${ext}`;
+  // Se agrega versión temporal para evitar que navegadores/CDN sirvan foto antigua por caché.
+  return `${userId}-${slug}-${Date.now()}${ext}`;
 }
 
 function extensionFromMime(mime: string): string {
